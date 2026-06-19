@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Key Shift Piano</title>
+    <link rel="stylesheet" href="./styles.css">
+  </head>
+  <body>
+    <main class="app-shell">
+      <section class="workspace" aria-labelledby="app-title">
+        <div class="brand">
+          <div class="mark" aria-hidden="true">
+            <span></span>
+            <span></span>
+            <span></span>
+            <span></span>
+          </div>
+          <div>
+            <p class="eyebrow">Local MusicXML transposer</p>
+            <h1 id="app-title">Key Shift Piano</h1>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="field-group">
+            <label for="file-path">Input file</label>
+            <div class="file-row">
+              <input id="file-path" type="text" readonly placeholder="Choose a .musicxml, .xml, or .pdf file">
+              <button id="choose-file" type="button">Upload</button>
+            </div>
+            <p id="pdf-note" class="hint" hidden>PDF import uses the Audiveris OMR engine. Configure it in Settings before importing PDFs.</p>
+          </div>
+
+          <div class="field-group">
+            <label for="target-key">Target key</label>
+            <select id="target-key">
+              <optgroup label="Major keys">
+                <option value="C major">C major</option>
+                <option value="G major">G major</option>
+                <option value="D major">D major</option>
+                <option value="A major">A major</option>
+                <option value="E major">E major</option>
+                <option value="B major">B major</option>
+                <option value="F# major">F# major</option>
+                <option value="C# major">C# major</option>
+                <option value="F major">F major</option>
+                <option value="Bb major">Bb major</option>
+                <option value="Eb major">Eb major</option>
+                <option value="Ab major">Ab major</option>
+                <option value="Db major">Db major</option>
+                <option value="Gb major">Gb major</option>
+                <option value="Cb major">Cb major</option>
+              </optgroup>
+              <optgroup label="Minor keys">
+                <option value="A minor">A minor</option>
+                <option value="E minor">E minor</option>
+                <option value="B minor">B minor</option>
+                <option value="F# minor">F# minor</option>
+                <option value="C# minor">C# minor</option>
+                <option value="G# minor">G# minor</option>
+                <option value="D# minor">D# minor</option>
+                <option value="A# minor">A# minor</option>
+                <option value="D minor">D minor</option>
+                <option value="G minor">G minor</option>
+                <option value="C minor">C minor</option>
+                <option value="F minor">F minor</option>
+                <option value="Bb minor">Bb minor</option>
+                <option value="Eb minor">Eb minor</option>
+                <option value="Ab minor">Ab minor</option>
+              </optgroup>
+            </select>
+          </div>
+
+          <div class="field-group">
+            <label for="output-format">Output format</label>
+            <select id="output-format">
+              <option value="musicxml">MusicXML</option>
+              <option value="pdf">PDF</option>
+            </select>
+          </div>
+
+          <button id="shift-key" class="primary-action" type="button">Shift Key</button>
+
+          <div id="status" class="status" role="status" aria-live="polite"></div>
+
+          <details class="settings">
+            <summary>Settings</summary>
+            <div class="field-group">
+              <label for="audiveris-path">Audiveris executable</label>
+              <div class="file-row">
+                <input id="audiveris-path" type="text" placeholder="Required for PDF import">
+                <button id="choose-audiveris" type="button">Browse</button>
+              </div>
+            </div>
+
+            <div class="field-group">
+              <label for="musescore-path">MuseScore executable</label>
+              <div class="file-row">
+                <input id="musescore-path" type="text" placeholder="Required for PDF export">
+                <button id="choose-musescore" type="button">Browse</button>
+              </div>
+            </div>
+
+            <button id="save-settings" type="button" class="secondary-action">Save Settings</button>
+          </details>
+        </div>
+      </section>
+    </main>
+
+    <script src="./renderer.js"></script>
+  </body>
+</html>
