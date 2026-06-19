@@ -149,6 +149,8 @@ def _report_validation(progress, original_key: str, target_key_name: str) -> Non
         compatibility = output_validation.get("musescore_compatibility_check", "failed")
         measure_validation = output_validation.get("measure_validation") or {}
         duplicate_validation = output_validation.get("duplicate_measure_validation") or {}
+        staff_duration_issues = measure_validation.get("staff_duration_validation") or []
+        voice_duration_issues = measure_validation.get("voice_duration_validation") or []
         validation_detail = (
             f"XML valid: {'Yes' if output_validation.get('xml_valid') else 'No'}; "
             f"Harmony elements checked: {output_validation.get('harmony_elements_checked', 0)}; "
@@ -159,6 +161,8 @@ def _report_validation(progress, original_key: str, target_key_name: str) -> Non
             f"Skipped as intentional: {measure_validation.get('measures_skipped_as_intentional', 0)}; "
             f"Empty measures found: {measure_validation.get('empty_measures_found', 0)}; "
             f"Empty staff measures repaired: {measure_validation.get('empty_staff_measures_repaired', 0)}; "
+            f"Staff duration issues remaining: {len(staff_duration_issues)}; "
+            f"Voice duration issues remaining: {len(voice_duration_issues)}; "
             f"Duplicate measures found: {duplicate_validation.get('duplicate_measures_found', 0)}; "
             f"Duplicate measures removed: {duplicate_validation.get('duplicate_measures_removed', 0)}; "
             f"MuseScore compatibility check: {compatibility}"

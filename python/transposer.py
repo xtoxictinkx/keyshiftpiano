@@ -576,6 +576,13 @@ def _active_staff_count(measure, current: int) -> int:
     return max([current, *staff_numbers])
 
 
+def _part_staff_count(part) -> int:
+    count = 1
+    for measure in _find_children(part, "measure"):
+        count = max(count, _active_staff_count(measure, count))
+    return count
+
+
 def _measure_expected_duration(divisions: int, beats: int | None, beat_type: int | None) -> int | None:
     if divisions <= 0 or beats is None or beat_type is None or beats <= 0 or beat_type <= 0:
         return None
@@ -590,6 +597,7 @@ def _measure_actual_duration(measure) -> dict:
     has_content = False
     voices = set()
     staff_durations = {}
+    voice_durations = {}
     staves_found = set()
     valid = True
     for child in list(measure):
@@ -604,8 +612,9 @@ def _measure_actual_duration(measure) -> dict:
 
         has_content = True
         voice_element = _find_child(child, "voice")
+        voice_number = (voice_element.text or "").strip() if voice_element is not None else "1"
         if voice_element is not None and (voice_element.text or "").strip():
-            voices.add((voice_element.text or "").strip())
+            voices.add(voice_number)
 
         if _find_child(child, "chord") is not None:
             continue
@@ -618,6 +627,7 @@ def _measure_actual_duration(measure) -> dict:
             duration = int(float((duration_element.text or "").strip()))
             total += duration
             staff_durations[staff_number] = staff_durations.get(staff_number, 0) + duration
+            voice_durations[voice_number] = voice_durations.get(voice_number, 0) + duration
         except ValueError:
             valid = False
 
@@ -626,6 +636,7 @@ def _measure_actual_duration(measure) -> dict:
         "has_content": has_content,
         "voices": sorted(voices),
         "staff_durations": staff_durations,
+        "voice_durations": voice_durations,
         "staves_found": sorted(staves_found),
         "valid": valid,
     }
@@ -644,6 +655,13 @@ def _duration_type(duration: int, divisions: int) -> str | None:
     return ratios.get(duration)
 
 
+def _append_backup(measure, duration: int) -> None:
+    backup_element = ET.Element(_qualified_child_name(measure, "backup"))
+    duration_element = ET.SubElement(backup_element, _qualified_child_name(measure, "duration"))
+    duration_element.text = str(duration)
+    measure.append(backup_element)
+
+
 def _append_padding_rest(
     measure,
     duration: int,
@@ -658,7 +676,9 @@ def _append_padding_rest(
         rest_element.attrib["measure"] = "yes"
     duration_element = ET.SubElement(note_element, _qualified_child_name(measure, "duration"))
     duration_element.text = str(duration)
-    rest_type = _duration_type(duration, divisions)
+    voice_element = ET.SubElement(note_element, _qualified_child_name(measure, "voice"))
+    voice_element.text = "1"
+    rest_type = "whole" if measure_rest else _duration_type(duration, divisions)
     if rest_type:
         type_element = ET.SubElement(note_element, _qualified_child_name(measure, "type"))
         type_element.text = rest_type
@@ -697,6 +717,25 @@ def _measure_contains_real_music(measure) -> bool:
         if _find_child(note_element, "rest") is None:
             return True
     return False
+
+
+def _clear_rest_timeline(measure) -> None:
+    for child in list(measure):
+        local_name = _local_name(child.tag)
+        if local_name in {"backup", "forward"}:
+            measure.remove(child)
+            continue
+        if local_name == "note" and _find_child(child, "rest") is not None:
+            measure.remove(child)
+
+
+def _rebuild_empty_staff_rests(measure, expected: int, divisions: int, staff_count: int) -> int:
+    _clear_rest_timeline(measure)
+    for staff_number in range(1, staff_count + 1):
+        _append_padding_rest(measure, expected, divisions, staff_number, measure_rest=True)
+        if staff_number < staff_count:
+            _append_backup(measure, expected)
+    return staff_count
 
 
 def _detect_and_repair_duplicate_measures(root) -> dict:
@@ -758,13 +797,15 @@ def _repair_measure_durations(root) -> dict:
         "empty_measures_found": 0,
         "empty_staff_measures_repaired": 0,
         "bad_measures": [],
+        "staff_duration_validation": [],
+        "voice_duration_validation": [],
         "manual_review_measures": [],
         "errors": [],
     }
 
     for part in _iter_elements(root, "part"):
         active = (1, None, None)
-        active_staff_count = 1
+        active_staff_count = _part_staff_count(part)
         measures = _find_children(part, "measure")
         for index, measure in enumerate(measures):
             active = _active_time_signature(measure, active)
@@ -828,12 +869,30 @@ def _repair_measure_durations(root) -> dict:
             if expected_total is None:
                 continue
 
+            has_real_music = _measure_contains_real_music(measure)
+            staff_incomplete = any(
+                staff_durations.get(str(staff_number), 0) != expected
+                for staff_number in range(1, active_staff_count + 1)
+            )
+            if active_staff_count > 1 and not has_real_music and staff_incomplete:
+                report["incomplete_measures_found"] += 1
+                report["empty_measures_found"] += 1
+                rests_added = _rebuild_empty_staff_rests(measure, expected, active[0], active_staff_count)
+                diagnostic["rests_added"] = True
+                diagnostic["rests_added_count"] = rests_added
+                diagnostic["empty_staffs_repaired"] = [str(number) for number in range(1, active_staff_count + 1)]
+                diagnostic["skip_reason"] = ""
+                report["empty_staff_measures_repaired"] += rests_added
+                report["bad_measures"].append(diagnostic)
+                report["measures_repaired"] += 1
+                continue
+
             if actual == expected_total:
                 continue
 
             if actual < expected_total:
                 report["incomplete_measures_found"] += 1
-                if actual == 0:
+                if actual == 0 or (active_staff_count > 1 and not has_real_music):
                     report["empty_measures_found"] += 1
                 if index == 0 and actual > 0:
                     diagnostic["skip_reason"] = "pickup-like"
@@ -842,20 +901,26 @@ def _repair_measure_durations(root) -> dict:
                     continue
 
                 rests_added = 0
+                rest_specs = []
                 for staff_number in range(1, active_staff_count + 1):
                     staff_key = str(staff_number)
                     staff_actual = staff_durations.get(staff_key, 0)
                     if staff_actual >= expected:
                         continue
+                    rest_specs.append((staff_number, expected - staff_actual, staff_actual == 0))
+
+                for rest_index, (staff_number, rest_duration, is_empty_staff) in enumerate(rest_specs):
                     _append_padding_rest(
                         measure,
-                        expected - staff_actual,
+                        rest_duration,
                         active[0],
                         staff_number if active_staff_count > 1 else None,
-                        measure_rest=staff_actual == 0,
+                        measure_rest=is_empty_staff,
                     )
+                    if active_staff_count > 1 and rest_index < len(rest_specs) - 1:
+                        _append_backup(measure, rest_duration)
                     rests_added += 1
-                    if staff_actual == 0:
+                    if is_empty_staff:
                         report["empty_staff_measures_repaired"] += 1
                         diagnostic["empty_staffs_repaired"].append(str(staff_number))
                 diagnostic["rests_added"] = True
@@ -871,8 +936,67 @@ def _repair_measure_durations(root) -> dict:
             report["manual_review_measures"].append(number)
             report["errors"].append(f"Measure {number} is longer than the active time signature.")
 
+    report["staff_duration_validation"] = _validate_staff_duration_totals(root)
+    report["voice_duration_validation"] = _validate_voice_duration_totals(root)
     report["manual_review_measures"] = _compact_measure_list(report["manual_review_measures"])
     return report
+
+
+def _validate_staff_duration_totals(root) -> list[dict]:
+    diagnostics = []
+    for part in _iter_elements(root, "part"):
+        active = (1, None, None)
+        active_staff_count = 1
+        for measure in _find_children(part, "measure"):
+            active = _active_time_signature(measure, active)
+            active_staff_count = _active_staff_count(measure, active_staff_count)
+            expected = _measure_expected_duration(*active)
+            if expected is None:
+                continue
+
+            duration_info = _measure_actual_duration(measure)
+            staff_durations = duration_info["staff_durations"]
+            for staff_number in range(1, active_staff_count + 1):
+                found = staff_durations.get(str(staff_number), 0)
+                if found != expected:
+                    diagnostics.append(
+                        {
+                            "part_id": part.attrib.get("id", ""),
+                            "measure_number": measure.attrib.get("number", "?"),
+                            "staff_number": str(staff_number),
+                            "expected_duration": expected,
+                            "found_duration": found,
+                        }
+                    )
+    return diagnostics
+
+
+def _validate_voice_duration_totals(root) -> list[dict]:
+    diagnostics = []
+    for part in _iter_elements(root, "part"):
+        active = (1, None, None)
+        active_staff_count = _part_staff_count(part)
+        for measure in _find_children(part, "measure"):
+            active = _active_time_signature(measure, active)
+            active_staff_count = _active_staff_count(measure, active_staff_count)
+            expected = _measure_expected_duration(*active)
+            if expected is None:
+                continue
+
+            duration_info = _measure_actual_duration(measure)
+            for voice_number, found in duration_info["voice_durations"].items():
+                expected_voice_duration = expected * active_staff_count if active_staff_count > 1 else expected
+                if found != expected_voice_duration:
+                    diagnostics.append(
+                        {
+                            "part_id": part.attrib.get("id", ""),
+                            "measure_number": measure.attrib.get("number", "?"),
+                            "voice_number": str(voice_number),
+                            "expected_duration": expected_voice_duration,
+                            "found_duration": found,
+                        }
+                    )
+    return diagnostics
 
 
 def _validate_pitch_step(step: str | None) -> bool:
@@ -1049,7 +1173,8 @@ def _validate_and_repair_musicxml(
             score.write("musicxml", fp=str(repair_path))
             if repair_path.is_file() and repair_path.stat().st_size > 0:
                 repair_tree = ET.parse(repair_path)
-                repair_duplicates = _detect_and_repair_duplicate_measures(repair_tree.getroot())
+                repair_root = repair_tree.getroot()
+                repair_duplicates = _detect_and_repair_duplicate_measures(repair_root)
                 if repair_duplicates["duplicate_measures_found"]:
                     validation["duplicate_measure_validation"]["duplicate_measures_found"] += repair_duplicates[
                         "duplicate_measures_found"
@@ -1059,7 +1184,20 @@ def _validate_and_repair_musicxml(
                     ]
                     validation["duplicate_measure_validation"]["duplicates"].extend(repair_duplicates["duplicates"])
                     validation["duplicate_measure_validation"]["errors"].extend(repair_duplicates["errors"])
-                    repair_tree.write(repair_path, encoding="utf-8", xml_declaration=True)
+                post_export_measure_report = _repair_measure_durations(repair_root)
+                validation["measure_validation"]["empty_measures_found"] += post_export_measure_report.get(
+                    "empty_measures_found", 0
+                )
+                validation["measure_validation"]["empty_staff_measures_repaired"] += post_export_measure_report.get(
+                    "empty_staff_measures_repaired", 0
+                )
+                validation["measure_validation"]["staff_duration_validation"] = post_export_measure_report.get(
+                    "staff_duration_validation", []
+                )
+                validation["measure_validation"]["voice_duration_validation"] = post_export_measure_report.get(
+                    "voice_duration_validation", []
+                )
+                repair_tree.write(repair_path, encoding="utf-8", xml_declaration=True)
                 if validation["duplicate_measure_validation"]["errors"]:
                     validation["errors"].extend(validation["duplicate_measure_validation"]["errors"])
                     return validation

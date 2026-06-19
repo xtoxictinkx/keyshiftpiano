@@ -141,6 +141,47 @@ def _measure_rest_flags(file_path: Path, measure_number: str) -> list[str]:
     raise AssertionError(f"Measure {measure_number} was not found.")
 
 
+def _measure_rest_details(file_path: Path, measure_number: str) -> list[dict]:
+    root = ET.parse(file_path).getroot()
+    details = []
+    for measure in root.iter():
+        if _xml_local_name(measure.tag) != "measure" or measure.attrib.get("number") != measure_number:
+            continue
+        for note_element in _find_children(measure, "note"):
+            rest = _find_child(note_element, "rest")
+            if rest is None:
+                continue
+            duration = _find_child(note_element, "duration")
+            voice = _find_child(note_element, "voice")
+            note_type = _find_child(note_element, "type")
+            staff = _find_child(note_element, "staff")
+            details.append(
+                {
+                    "measure": rest.attrib.get("measure", ""),
+                    "duration": (duration.text or "").strip() if duration is not None else "",
+                    "voice": (voice.text or "").strip() if voice is not None else "",
+                    "type": (note_type.text or "").strip() if note_type is not None else "",
+                    "staff": (staff.text or "").strip() if staff is not None else "",
+                }
+            )
+        return details
+    raise AssertionError(f"Measure {measure_number} was not found.")
+
+
+def _measure_backup_durations(file_path: Path, measure_number: str) -> list[int]:
+    root = ET.parse(file_path).getroot()
+    durations = []
+    for measure in root.iter():
+        if _xml_local_name(measure.tag) != "measure" or measure.attrib.get("number") != measure_number:
+            continue
+        for backup in _find_children(measure, "backup"):
+            duration = _find_child(backup, "duration")
+            if duration is not None and (duration.text or "").strip():
+                durations.append(int(float((duration.text or "").strip())))
+        return durations
+    raise AssertionError(f"Measure {measure_number} was not found.")
+
+
 @unittest.skipIf(stream is None, "music21 is not installed")
 class TransposerTests(unittest.TestCase):
     def test_transposes_musicxml_to_target_key(self):
@@ -398,6 +439,39 @@ class DirectMusicXmlFallbackTests(unittest.TestCase):
     <measure number="126"></measure>
     <measure number="127"></measure>
     <measure number="128"></measure>
+"""
+
+    EMPTY_TWO_STAFF_MEASURE = """
+    <measure number="1">
+      <attributes>
+        <divisions>4</divisions>
+        <key><fifths>0</fifths></key>
+        <time><beats>4</beats><beat-type>4</beat-type></time>
+        <staves>2</staves>
+      </attributes>
+      <note>
+        <rest measure="yes"/>
+        <duration>16</duration>
+        <voice>1</voice>
+        <type>whole</type>
+      </note>
+    </measure>
+"""
+
+    SINGLE_STAFF_EMPTY_MEASURE = """
+    <measure number="1">
+      <attributes>
+        <divisions>4</divisions>
+        <key><fifths>0</fifths></key>
+        <time><beats>4</beats><beat-type>4</beat-type></time>
+      </attributes>
+      <note>
+        <rest measure="yes"/>
+        <duration>16</duration>
+        <voice>1</voice>
+        <type>whole</type>
+      </note>
+    </measure>
 """
 
     def test_direct_musicxml_fallback_transposes_pitches_and_key(self):
@@ -669,16 +743,76 @@ class DirectMusicXmlFallbackTests(unittest.TestCase):
             self.assertEqual(measure_123, {"1": 28, "2": 28, "3": 28, "4": 28})
             self.assertEqual(_measure_rest_flags(output_path, "121"), ["yes", "yes", "yes", "yes"])
             self.assertEqual(_measure_rest_flags(output_path, "123"), ["yes", "yes", "yes", "yes"])
+            self.assertEqual(
+                _measure_rest_details(output_path, "121"),
+                [
+                    {"measure": "yes", "duration": "32", "voice": "1", "type": "whole", "staff": "1"},
+                    {"measure": "yes", "duration": "32", "voice": "1", "type": "whole", "staff": "2"},
+                    {"measure": "yes", "duration": "32", "voice": "1", "type": "whole", "staff": "3"},
+                    {"measure": "yes", "duration": "32", "voice": "1", "type": "whole", "staff": "4"},
+                ],
+            )
+            self.assertEqual(_measure_backup_durations(output_path, "121"), [32, 32, 32])
+            self.assertEqual(_measure_backup_durations(output_path, "123"), [28, 28, 28])
 
             measure_report = get_last_transposition_report()["output_validation"]["measure_validation"]
             diagnostics = {item["measure_number"]: item for item in measure_report["bad_measures"]}
             self.assertEqual(measure_report["empty_measures_found"], 8)
             self.assertEqual(measure_report["empty_staff_measures_repaired"], 32)
+            self.assertEqual(measure_report["staff_duration_validation"], [])
+            self.assertEqual(measure_report["voice_duration_validation"], [])
             self.assertEqual(diagnostics["121"]["staff_count"], 4)
             self.assertEqual(diagnostics["121"]["rests_added_count"], 4)
             self.assertEqual(diagnostics["121"]["empty_staffs_repaired"], ["1", "2", "3", "4"])
             self.assertEqual(diagnostics["123"]["expected_duration"], 28)
             self.assertEqual(diagnostics["123"]["rests_added_count"], 4)
+
+    def test_unstaffed_two_staff_measure_rest_is_rebuilt_with_staffs_and_backup(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_path = Path(tmpdir)
+            input_path = tmp_path / "two-staff.musicxml"
+            output_path = tmp_path / "two-staff-d.musicxml"
+            input_path.write_text(
+                self.MEASURE_TEMPLATE.format(measures=self.EMPTY_TWO_STAFF_MEASURE),
+                encoding="utf-8",
+            )
+
+            class TargetKey:
+                sharps = 2
+
+            _transpose_musicxml_directly(input_path, output_path, 2, TargetKey(), source_key_name="C major")
+
+            self.assertEqual(_measure_staff_duration_info(output_path, "1"), {"1": 16, "2": 16})
+            self.assertEqual(
+                _measure_rest_details(output_path, "1"),
+                [
+                    {"measure": "yes", "duration": "16", "voice": "1", "type": "whole", "staff": "1"},
+                    {"measure": "yes", "duration": "16", "voice": "1", "type": "whole", "staff": "2"},
+                ],
+            )
+            self.assertEqual(_measure_backup_durations(output_path, "1"), [16])
+            measure_report = get_last_transposition_report()["output_validation"]["measure_validation"]
+            self.assertEqual(measure_report["staff_duration_validation"], [])
+            self.assertEqual(measure_report["voice_duration_validation"], [])
+
+    def test_single_staff_measure_rest_remains_single_staff(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_path = Path(tmpdir)
+            input_path = tmp_path / "single-staff.musicxml"
+            output_path = tmp_path / "single-staff-d.musicxml"
+            input_path.write_text(
+                self.MEASURE_TEMPLATE.format(measures=self.SINGLE_STAFF_EMPTY_MEASURE),
+                encoding="utf-8",
+            )
+
+            class TargetKey:
+                sharps = 2
+
+            _transpose_musicxml_directly(input_path, output_path, 2, TargetKey(), source_key_name="C major")
+
+            self.assertEqual(_measure_staff_duration_info(output_path, "1"), {"1": 16})
+            self.assertEqual(_measure_backup_durations(output_path, "1"), [])
+            self.assertEqual(_measure_rest_details(output_path, "1")[0]["staff"], "")
 
     def test_direct_mxl_fallback_transposes_inner_musicxml(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -838,6 +972,8 @@ class PipelineTests(unittest.TestCase):
                                     "measures_skipped_as_intentional": 7,
                                     "empty_measures_found": 8,
                                     "empty_staff_measures_repaired": 32,
+                                    "staff_duration_validation": [],
+                                    "voice_duration_validation": [],
                                     "manual_review_measures": ["122-128"],
                                 },
                             },
@@ -854,6 +990,8 @@ class PipelineTests(unittest.TestCase):
             self.assertTrue(any("Measures 122-128 still need manual review." in detail for _name, detail in stages))
             self.assertTrue(any("Empty measures found: 8" in detail for _name, detail in stages))
             self.assertTrue(any("Empty staff measures repaired: 32" in detail for _name, detail in stages))
+            self.assertTrue(any("Staff duration issues remaining: 0" in detail for _name, detail in stages))
+            self.assertTrue(any("Voice duration issues remaining: 0" in detail for _name, detail in stages))
             self.assertTrue(any("Duplicate measures found: 2" in detail for _name, detail in stages))
             self.assertTrue(any("Duplicate measures removed: 2" in detail for _name, detail in stages))
 
