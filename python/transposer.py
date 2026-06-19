@@ -512,17 +512,22 @@ def _qualified_child_name(parent, child_name: str) -> str:
     return child_name
 
 
-def _has_complex_measure_markers(measure) -> bool:
+def _measure_markers(measure) -> set[str]:
+    markers = set()
     for element in measure.iter():
         local_name = _local_name(element.tag)
-        if local_name in {"backup", "forward", "repeat", "ending"}:
-            return True
+        if local_name in {"backup", "forward"}:
+            markers.add("backup/forward")
+        if local_name == "repeat":
+            markers.add("repeat")
+        if local_name == "ending":
+            markers.add("ending")
         if local_name == "multiple-rest":
-            return True
-    return False
+            markers.add("multi-measure rest")
+    return markers
 
 
-def _active_time_signature(measure, current: tuple[int, int, int]) -> tuple[int, int, int]:
+def _active_time_signature(measure, current: tuple[int, int | None, int | None]) -> tuple[int, int | None, int | None]:
     divisions, beats, beat_type = current
     attributes = _find_child(measure, "attributes")
     if attributes is None:
@@ -548,8 +553,31 @@ def _active_time_signature(measure, current: tuple[int, int, int]) -> tuple[int,
     return divisions, beats, beat_type
 
 
-def _measure_expected_duration(divisions: int, beats: int, beat_type: int) -> int | None:
-    if divisions <= 0 or beats <= 0 or beat_type <= 0:
+def _active_staff_count(measure, current: int) -> int:
+    attributes = _find_child(measure, "attributes")
+    if attributes is not None:
+        staves_element = _find_child(attributes, "staves")
+        if staves_element is not None:
+            try:
+                return max(1, int((staves_element.text or "").strip()))
+            except ValueError:
+                pass
+
+    staff_numbers = []
+    for note_element in _find_children(measure, "note"):
+        staff_element = _find_child(note_element, "staff")
+        if staff_element is None:
+            continue
+        try:
+            staff_numbers.append(int((staff_element.text or "").strip()))
+        except ValueError:
+            continue
+
+    return max([current, *staff_numbers])
+
+
+def _measure_expected_duration(divisions: int, beats: int | None, beat_type: int | None) -> int | None:
+    if divisions <= 0 or beats is None or beat_type is None or beats <= 0 or beat_type <= 0:
         return None
     expected = divisions * beats * 4 / beat_type
     if expected != int(expected):
@@ -557,10 +585,13 @@ def _measure_expected_duration(divisions: int, beats: int, beat_type: int) -> in
     return int(expected)
 
 
-def _measure_actual_duration(measure) -> tuple[int, bool]:
+def _measure_actual_duration(measure) -> dict:
     total = 0
     has_content = False
     voices = set()
+    staff_durations = {}
+    staves_found = set()
+    valid = True
     for child in list(measure):
         if _local_name(child.tag) != "note":
             continue
@@ -579,14 +610,25 @@ def _measure_actual_duration(measure) -> tuple[int, bool]:
         if _find_child(child, "chord") is not None:
             continue
 
-        try:
-            total += int(float((duration_element.text or "").strip()))
-        except ValueError:
-            return total, False
+        staff_element = _find_child(child, "staff")
+        staff_number = (staff_element.text or "").strip() if staff_element is not None else "1"
+        staves_found.add(staff_number)
 
-    if len(voices) > 1:
-        return total, False
-    return total, has_content
+        try:
+            duration = int(float((duration_element.text or "").strip()))
+            total += duration
+            staff_durations[staff_number] = staff_durations.get(staff_number, 0) + duration
+        except ValueError:
+            valid = False
+
+    return {
+        "actual_duration": total,
+        "has_content": has_content,
+        "voices": sorted(voices),
+        "staff_durations": staff_durations,
+        "staves_found": sorted(staves_found),
+        "valid": valid,
+    }
 
 
 def _duration_type(duration: int, divisions: int) -> str | None:
@@ -602,16 +644,109 @@ def _duration_type(duration: int, divisions: int) -> str | None:
     return ratios.get(duration)
 
 
-def _append_padding_rest(measure, duration: int, divisions: int) -> None:
+def _append_padding_rest(
+    measure,
+    duration: int,
+    divisions: int,
+    staff_number: int | None = None,
+    *,
+    measure_rest: bool = False,
+) -> None:
     note_element = ET.Element(_qualified_child_name(measure, "note"))
-    ET.SubElement(note_element, _qualified_child_name(measure, "rest"))
+    rest_element = ET.SubElement(note_element, _qualified_child_name(measure, "rest"))
+    if measure_rest:
+        rest_element.attrib["measure"] = "yes"
     duration_element = ET.SubElement(note_element, _qualified_child_name(measure, "duration"))
     duration_element.text = str(duration)
     rest_type = _duration_type(duration, divisions)
     if rest_type:
         type_element = ET.SubElement(note_element, _qualified_child_name(measure, "type"))
         type_element.text = rest_type
+    if staff_number is not None:
+        staff_element = ET.SubElement(note_element, _qualified_child_name(measure, "staff"))
+        staff_element.text = str(staff_number)
     measure.append(note_element)
+
+
+def _compact_measure_list(measure_numbers: list[str]) -> list[str]:
+    numeric = []
+    other = []
+    for number in dict.fromkeys(measure_numbers):
+        try:
+            numeric.append(int(str(number)))
+        except ValueError:
+            other.append(str(number))
+
+    numeric.sort()
+    ranges = []
+    index = 0
+    while index < len(numeric):
+        start = numeric[index]
+        end = start
+        while index + 1 < len(numeric) and numeric[index + 1] == end + 1:
+            index += 1
+            end = numeric[index]
+        ranges.append(str(start) if start == end else f"{start}-{end}")
+        index += 1
+
+    return ranges + other
+
+
+def _measure_contains_real_music(measure) -> bool:
+    for note_element in _find_children(measure, "note"):
+        if _find_child(note_element, "rest") is None:
+            return True
+    return False
+
+
+def _detect_and_repair_duplicate_measures(root) -> dict:
+    report = {
+        "duplicate_measures_found": 0,
+        "duplicate_measures_removed": 0,
+        "duplicates": [],
+        "errors": [],
+    }
+
+    for part in _iter_elements(root, "part"):
+        part_id = part.attrib.get("id", "")
+        by_number = {}
+        for measure in _find_children(part, "measure"):
+            number = measure.attrib.get("number", "")
+            if not number:
+                continue
+            by_number.setdefault(number, []).append(measure)
+
+        for number, measures in by_number.items():
+            if len(measures) <= 1:
+                continue
+
+            report["duplicate_measures_found"] += len(measures) - 1
+            duplicate_entry = {
+                "part_id": part_id,
+                "measure_number": number,
+                "duplicate_count": len(measures),
+                "removed_count": 0,
+            }
+
+            keep = next((measure for measure in measures if _measure_contains_real_music(measure)), measures[0])
+            for measure in measures:
+                if measure is keep:
+                    continue
+                if _measure_contains_real_music(measure):
+                    continue
+                part.remove(measure)
+                duplicate_entry["removed_count"] += 1
+                report["duplicate_measures_removed"] += 1
+
+            remaining = [measure for measure in _find_children(part, "measure") if measure.attrib.get("number", "") == number]
+            if len(remaining) > 1:
+                report["errors"].append(
+                    f"Part {part_id or '?'} measure {number} appears {len(remaining)} times."
+                )
+
+            report["duplicates"].append(duplicate_entry)
+
+    return report
 
 
 def _repair_measure_durations(root) -> dict:
@@ -620,45 +755,123 @@ def _repair_measure_durations(root) -> dict:
         "incomplete_measures_found": 0,
         "measures_repaired": 0,
         "measures_skipped_as_intentional": 0,
+        "empty_measures_found": 0,
+        "empty_staff_measures_repaired": 0,
+        "bad_measures": [],
+        "manual_review_measures": [],
         "errors": [],
     }
 
     for part in _iter_elements(root, "part"):
-        active = (1, 4, 4)
+        active = (1, None, None)
+        active_staff_count = 1
         measures = _find_children(part, "measure")
         for index, measure in enumerate(measures):
             active = _active_time_signature(measure, active)
+            active_staff_count = _active_staff_count(measure, active_staff_count)
             expected = _measure_expected_duration(*active)
+            number = measure.attrib.get("number", "?")
+            marker_reasons = _measure_markers(measure)
+            duration_info = _measure_actual_duration(measure)
+            actual = duration_info["actual_duration"]
+            voices = duration_info["voices"]
+            staff_durations = duration_info["staff_durations"]
+            expected_total = None if expected is None else expected * active_staff_count
+            diagnostic = {
+                "measure_number": number,
+                "expected_duration": expected,
+                "actual_duration": actual,
+                "expected_total_duration": expected_total,
+                "missing_duration": None if expected_total is None else expected_total - actual,
+                "staff_count": active_staff_count,
+                "staff_durations": staff_durations,
+                "voices_found": voices,
+                "backups_forwards_found": "backup/forward" in marker_reasons,
+                "rests_added": False,
+                "rests_added_count": 0,
+                "empty_staffs_repaired": [],
+                "skip_reason": "",
+            }
+
             if expected is None:
+                diagnostic["skip_reason"] = "no time signature"
+                report["bad_measures"].append(diagnostic)
+                report["manual_review_measures"].append(number)
                 continue
 
             report["total_measures_checked"] += 1
-            if _has_complex_measure_markers(measure):
+            if marker_reasons:
+                diagnostic["skip_reason"] = ", ".join(sorted(marker_reasons))
                 report["measures_skipped_as_intentional"] += 1
+                if expected_total is not None and actual != expected_total:
+                    report["incomplete_measures_found"] += 1
+                    report["bad_measures"].append(diagnostic)
+                    report["manual_review_measures"].append(number)
                 continue
 
-            actual, safe_to_measure = _measure_actual_duration(measure)
-            if not safe_to_measure and actual != 0:
+            if not duration_info["valid"]:
+                diagnostic["skip_reason"] = "duration mismatch too complex"
                 report["measures_skipped_as_intentional"] += 1
+                report["bad_measures"].append(diagnostic)
+                report["manual_review_measures"].append(number)
                 continue
 
-            if actual == expected:
+            if len(voices) > 1:
+                diagnostic["skip_reason"] = "multi-voice"
+                report["measures_skipped_as_intentional"] += 1
+                if expected_total is not None and actual != expected_total:
+                    report["incomplete_measures_found"] += 1
+                    report["bad_measures"].append(diagnostic)
+                    report["manual_review_measures"].append(number)
                 continue
 
-            if actual < expected:
+            if expected_total is None:
+                continue
+
+            if actual == expected_total:
+                continue
+
+            if actual < expected_total:
                 report["incomplete_measures_found"] += 1
+                if actual == 0:
+                    report["empty_measures_found"] += 1
                 if index == 0 and actual > 0:
+                    diagnostic["skip_reason"] = "pickup-like"
                     report["measures_skipped_as_intentional"] += 1
+                    report["bad_measures"].append(diagnostic)
                     continue
 
-                _append_padding_rest(measure, expected - actual, active[0])
+                rests_added = 0
+                for staff_number in range(1, active_staff_count + 1):
+                    staff_key = str(staff_number)
+                    staff_actual = staff_durations.get(staff_key, 0)
+                    if staff_actual >= expected:
+                        continue
+                    _append_padding_rest(
+                        measure,
+                        expected - staff_actual,
+                        active[0],
+                        staff_number if active_staff_count > 1 else None,
+                        measure_rest=staff_actual == 0,
+                    )
+                    rests_added += 1
+                    if staff_actual == 0:
+                        report["empty_staff_measures_repaired"] += 1
+                        diagnostic["empty_staffs_repaired"].append(str(staff_number))
+                diagnostic["rests_added"] = True
+                diagnostic["rests_added_count"] = rests_added
+                diagnostic["skip_reason"] = ""
+                report["bad_measures"].append(diagnostic)
                 report["measures_repaired"] += 1
                 continue
 
             report["incomplete_measures_found"] += 1
-            number = measure.attrib.get("number", "?")
+            diagnostic["skip_reason"] = "duration mismatch too complex"
+            report["bad_measures"].append(diagnostic)
+            report["manual_review_measures"].append(number)
             report["errors"].append(f"Measure {number} is longer than the active time signature.")
 
+    report["manual_review_measures"] = _compact_measure_list(report["manual_review_measures"])
     return report
 
 
@@ -702,6 +915,18 @@ def _validate_musicxml_tree(root) -> dict:
     for measure in _iter_elements(root, "measure"):
         if not (measure.attrib.get("number") or "").strip():
             errors.append("A measure is missing its number.")
+
+    for part in _iter_elements(root, "part"):
+        seen = {}
+        part_id = part.attrib.get("id", "")
+        for measure in _find_children(part, "measure"):
+            number = measure.attrib.get("number", "")
+            if not number:
+                continue
+            seen[number] = seen.get(number, 0) + 1
+        for number, count in seen.items():
+            if count > 1:
+                errors.append(f"Part {part_id or '?'} has duplicate measure number {number} ({count} copies).")
 
     for key_element in _iter_elements(root, "key"):
         fifths_element = _find_child(key_element, "fifths")
@@ -768,7 +993,13 @@ def _musicxml_version_ok(root) -> bool:
         return False
 
 
-def _validate_and_repair_musicxml(output_path: Path, *, metadata_updated: int, measure_report: dict | None = None) -> dict:
+def _validate_and_repair_musicxml(
+    output_path: Path,
+    *,
+    metadata_updated: int,
+    measure_report: dict | None = None,
+    duplicate_report: dict | None = None,
+) -> dict:
     validation = {
         "xml_valid": False,
         "musicxml_4_0": False,
@@ -779,6 +1010,12 @@ def _validate_and_repair_musicxml(output_path: Path, *, metadata_updated: int, m
             "incomplete_measures_found": 0,
             "measures_repaired": 0,
             "measures_skipped_as_intentional": 0,
+            "errors": [],
+        },
+        "duplicate_measure_validation": duplicate_report or {
+            "duplicate_measures_found": 0,
+            "duplicate_measures_removed": 0,
+            "duplicates": [],
             "errors": [],
         },
         "musescore_compatibility_check": "failed",
@@ -799,6 +1036,7 @@ def _validate_and_repair_musicxml(output_path: Path, *, metadata_updated: int, m
         return validation
 
     validation["errors"].extend(validation["measure_validation"].get("errors") or [])
+    validation["errors"].extend(validation["duplicate_measure_validation"].get("errors") or [])
 
     if validation["errors"]:
         return validation
@@ -810,6 +1048,21 @@ def _validate_and_repair_musicxml(output_path: Path, *, metadata_updated: int, m
             score = converter.parse(str(output_path))
             score.write("musicxml", fp=str(repair_path))
             if repair_path.is_file() and repair_path.stat().st_size > 0:
+                repair_tree = ET.parse(repair_path)
+                repair_duplicates = _detect_and_repair_duplicate_measures(repair_tree.getroot())
+                if repair_duplicates["duplicate_measures_found"]:
+                    validation["duplicate_measure_validation"]["duplicate_measures_found"] += repair_duplicates[
+                        "duplicate_measures_found"
+                    ]
+                    validation["duplicate_measure_validation"]["duplicate_measures_removed"] += repair_duplicates[
+                        "duplicate_measures_removed"
+                    ]
+                    validation["duplicate_measure_validation"]["duplicates"].extend(repair_duplicates["duplicates"])
+                    validation["duplicate_measure_validation"]["errors"].extend(repair_duplicates["errors"])
+                    repair_tree.write(repair_path, encoding="utf-8", xml_declaration=True)
+                if validation["duplicate_measure_validation"]["errors"]:
+                    validation["errors"].extend(validation["duplicate_measure_validation"]["errors"])
+                    return validation
                 shutil.copyfile(repair_path, output_path)
                 validation["repair_used"] = True
                 validation["musescore_compatibility_check"] = "passed"
@@ -879,6 +1132,7 @@ def _transpose_musicxml_directly(
 
     harmony_count = _transpose_harmonies(root, semitone_delta, prefer_flats)
     key_label_count, chord_text_count, metadata_count = _update_visible_text(root, semitone_delta, target_key, prefer_flats)
+    duplicate_report = _detect_and_repair_duplicate_measures(root)
     measure_report = _repair_measure_durations(root)
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -887,6 +1141,7 @@ def _transpose_musicxml_directly(
         output_path,
         metadata_updated=metadata_count,
         measure_report=measure_report,
+        duplicate_report=duplicate_report,
     )
     LAST_TRANSPOSITION_REPORT = {
         "source_key": source_key_name,

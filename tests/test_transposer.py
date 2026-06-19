@@ -96,6 +96,51 @@ def _measure_duration_info(file_path: Path, measure_number: str) -> dict:
     raise AssertionError(f"Measure {measure_number} was not found.")
 
 
+def _measure_number_counts(file_path: Path) -> dict[str, int]:
+    root = ET.parse(file_path).getroot()
+    counts = {}
+    for measure in root.iter():
+        if _xml_local_name(measure.tag) != "measure":
+            continue
+        number = measure.attrib.get("number", "")
+        if number:
+            counts[number] = counts.get(number, 0) + 1
+    return counts
+
+
+def _measure_staff_duration_info(file_path: Path, measure_number: str) -> dict[str, int]:
+    root = ET.parse(file_path).getroot()
+    durations = {}
+    for measure in root.iter():
+        if _xml_local_name(measure.tag) != "measure" or measure.attrib.get("number") != measure_number:
+            continue
+        for note_element in _find_children(measure, "note"):
+            if _find_child(note_element, "chord") is not None or _find_child(note_element, "grace") is not None:
+                continue
+            duration = _find_child(note_element, "duration")
+            if duration is None or not (duration.text or "").strip():
+                continue
+            staff = _find_child(note_element, "staff")
+            staff_number = (staff.text or "").strip() if staff is not None else "1"
+            durations[staff_number] = durations.get(staff_number, 0) + int(float((duration.text or "").strip()))
+        return durations
+    raise AssertionError(f"Measure {measure_number} was not found.")
+
+
+def _measure_rest_flags(file_path: Path, measure_number: str) -> list[str]:
+    root = ET.parse(file_path).getroot()
+    flags = []
+    for measure in root.iter():
+        if _xml_local_name(measure.tag) != "measure" or measure.attrib.get("number") != measure_number:
+            continue
+        for note_element in _find_children(measure, "note"):
+            rest = _find_child(note_element, "rest")
+            if rest is not None:
+                flags.append(rest.attrib.get("measure", ""))
+        return flags
+    raise AssertionError(f"Measure {measure_number} was not found.")
+
+
 @unittest.skipIf(stream is None, "music21 is not installed")
 class TransposerTests(unittest.TestCase):
     def test_transposes_musicxml_to_target_key(self):
@@ -250,6 +295,111 @@ class DirectMusicXmlFallbackTests(unittest.TestCase):
     </measure>
 """
 
+    DIAGNOSTIC_MEASURES = """
+    <measure number="122">
+      <attributes>
+        <divisions>1</divisions>
+        <key><fifths>0</fifths></key>
+        <time><beats>4</beats><beat-type>4</beat-type></time>
+      </attributes>
+      <note><pitch><step>C</step><octave>4</octave></pitch><duration>2</duration><voice>1</voice><type>half</type></note>
+      <barline location="right"><repeat direction="forward"/></barline>
+    </measure>
+    <measure number="123">
+      <note><pitch><step>D</step><octave>4</octave></pitch><duration>2</duration><voice>1</voice><type>half</type></note>
+      <backup><duration>2</duration></backup>
+    </measure>
+    <measure number="124">
+      <note><pitch><step>E</step><octave>4</octave></pitch><duration>2</duration><voice>1</voice><type>half</type></note>
+      <note><pitch><step>G</step><octave>4</octave></pitch><duration>1</duration><voice>2</voice><type>quarter</type></note>
+    </measure>
+    <measure number="125">
+      <note><pitch><step>F</step><octave>4</octave></pitch><duration>2</duration><voice>1</voice><type>half</type></note>
+      <notations><ending number="1" type="start"/></notations>
+    </measure>
+    <measure number="126">
+      <attributes><measure-style><multiple-rest>2</multiple-rest></measure-style></attributes>
+      <note><rest/><duration>2</duration><type>half</type></note>
+    </measure>
+    <measure number="127">
+      <note><pitch><step>A</step><octave>4</octave></pitch><duration>2</duration><voice>1</voice><type>half</type></note>
+      <direction><direction-type><words>C</words></direction-type></direction>
+    </measure>
+    <measure number="128">
+      <note><pitch><step>B</step><octave>4</octave></pitch><duration>5</duration><voice>1</voice><type>whole</type></note>
+    </measure>
+"""
+
+    NO_TIME_SIGNATURE_MEASURE = """
+    <measure number="1">
+      <attributes>
+        <divisions>1</divisions>
+        <key><fifths>0</fifths></key>
+      </attributes>
+      <note><pitch><step>C</step><octave>4</octave></pitch><duration>1</duration><type>quarter</type></note>
+    </measure>
+"""
+
+    DUPLICATE_122_128_MEASURES = """
+    <measure number="122">
+      <attributes>
+        <divisions>1</divisions>
+        <key><fifths>0</fifths></key>
+        <time><beats>4</beats><beat-type>4</beat-type></time>
+      </attributes>
+      <note><pitch><step>C</step><octave>4</octave></pitch><duration>4</duration><type>whole</type></note>
+    </measure>
+    <measure number="122"><note><rest/><duration>4</duration><type>whole</type></note></measure>
+    <measure number="123"><note><pitch><step>D</step><octave>4</octave></pitch><duration>4</duration><type>whole</type></note></measure>
+    <measure number="123"><note><rest/><duration>4</duration><type>whole</type></note></measure>
+    <measure number="124"><note><pitch><step>E</step><octave>4</octave></pitch><duration>4</duration><type>whole</type></note></measure>
+    <measure number="124"><note><rest/><duration>4</duration><type>whole</type></note></measure>
+    <measure number="125"><note><pitch><step>F</step><octave>4</octave></pitch><duration>4</duration><type>whole</type></note></measure>
+    <measure number="125"><note><rest/><duration>4</duration><type>whole</type></note></measure>
+    <measure number="126"><note><pitch><step>G</step><octave>4</octave></pitch><duration>4</duration><type>whole</type></note></measure>
+    <measure number="126"><note><rest/><duration>4</duration><type>whole</type></note></measure>
+    <measure number="127"><note><pitch><step>A</step><octave>4</octave></pitch><duration>4</duration><type>whole</type></note></measure>
+    <measure number="127"><note><rest/><duration>4</duration><type>whole</type></note></measure>
+    <measure number="128"><note><pitch><step>B</step><octave>4</octave></pitch><duration>4</duration><type>whole</type></note></measure>
+    <measure number="128"><note><rest/><duration>4</duration><type>whole</type></note></measure>
+"""
+
+    DUPLICATE_REAL_MEASURES = """
+    <measure number="122">
+      <attributes>
+        <divisions>1</divisions>
+        <key><fifths>0</fifths></key>
+        <time><beats>4</beats><beat-type>4</beat-type></time>
+      </attributes>
+      <note><pitch><step>C</step><octave>4</octave></pitch><duration>4</duration><type>whole</type></note>
+    </measure>
+    <measure number="122">
+      <note><pitch><step>D</step><octave>4</octave></pitch><duration>4</duration><type>whole</type></note>
+    </measure>
+"""
+
+    EMPTY_FOUR_STAFF_MEASURES = """
+    <measure number="121">
+      <attributes>
+        <divisions>8</divisions>
+        <key><fifths>0</fifths></key>
+        <time><beats>4</beats><beat-type>4</beat-type></time>
+        <staves>4</staves>
+      </attributes>
+    </measure>
+    <measure number="122"></measure>
+    <measure number="123">
+      <attributes><time><beats>7</beats><beat-type>8</beat-type></time></attributes>
+    </measure>
+    <measure number="124">
+      <attributes><time><beats>4</beats><beat-type>4</beat-type></time></attributes>
+    </measure>
+    <measure number="125"></measure>
+    <measure number="126"></measure>
+    <measure number="127"></measure>
+    <measure number="128"></measure>
+"""
+
     def test_direct_musicxml_fallback_transposes_pitches_and_key(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             tmp_path = Path(tmpdir)
@@ -388,6 +538,148 @@ class DirectMusicXmlFallbackTests(unittest.TestCase):
             self.assertEqual(measure_report["measures_repaired"], 0)
             self.assertEqual(measure_report["measures_skipped_as_intentional"], 1)
 
+    def test_skipped_measure_diagnostics_include_exact_reasons(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_path = Path(tmpdir)
+            input_path = tmp_path / "diagnostics.musicxml"
+            output_path = tmp_path / "diagnostics-d.musicxml"
+            input_path.write_text(self.MEASURE_TEMPLATE.format(measures=self.DIAGNOSTIC_MEASURES), encoding="utf-8")
+
+            class TargetKey:
+                sharps = 2
+
+            _transpose_musicxml_directly(input_path, output_path, 2, TargetKey(), source_key_name="C major")
+
+            measure_report = get_last_transposition_report()["output_validation"]["measure_validation"]
+            diagnostics = {item["measure_number"]: item for item in measure_report["bad_measures"]}
+            self.assertEqual(diagnostics["122"]["skip_reason"], "repeat")
+            self.assertTrue(diagnostics["123"]["backups_forwards_found"])
+            self.assertEqual(diagnostics["123"]["skip_reason"], "backup/forward")
+            self.assertEqual(diagnostics["124"]["skip_reason"], "multi-voice")
+            self.assertEqual(diagnostics["124"]["voices_found"], ["1", "2"])
+            self.assertEqual(diagnostics["125"]["skip_reason"], "ending")
+            self.assertEqual(diagnostics["126"]["skip_reason"], "multi-measure rest")
+            self.assertEqual(diagnostics["128"]["skip_reason"], "duration mismatch too complex")
+            self.assertIn("122-126", measure_report["manual_review_measures"])
+            self.assertIn("128", measure_report["manual_review_measures"])
+
+    def test_simple_measure_with_direction_is_repaired(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_path = Path(tmpdir)
+            input_path = tmp_path / "simple-direction.musicxml"
+            output_path = tmp_path / "simple-direction-d.musicxml"
+            input_path.write_text(self.MEASURE_TEMPLATE.format(measures=self.DIAGNOSTIC_MEASURES), encoding="utf-8")
+
+            class TargetKey:
+                sharps = 2
+
+            _transpose_musicxml_directly(input_path, output_path, 2, TargetKey(), source_key_name="C major")
+
+            measure_report = get_last_transposition_report()["output_validation"]["measure_validation"]
+            diagnostics = {item["measure_number"]: item for item in measure_report["bad_measures"]}
+            self.assertTrue(diagnostics["127"]["rests_added"])
+            self.assertEqual(diagnostics["127"]["missing_duration"], 2)
+            self.assertNotIn("127", measure_report["manual_review_measures"])
+            measure_info = _measure_duration_info(output_path, "127")
+            self.assertGreaterEqual(measure_info["rest_count"], 1)
+            self.assertEqual(measure_info["actual_duration"], measure_info["expected_duration"])
+
+    def test_no_time_signature_diagnostic_is_reported(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_path = Path(tmpdir)
+            input_path = tmp_path / "no-time.musicxml"
+            output_path = tmp_path / "no-time-d.musicxml"
+            input_path.write_text(self.MEASURE_TEMPLATE.format(measures=self.NO_TIME_SIGNATURE_MEASURE), encoding="utf-8")
+
+            class TargetKey:
+                sharps = 2
+
+            _transpose_musicxml_directly(input_path, output_path, 2, TargetKey(), source_key_name="C major")
+
+            measure_report = get_last_transposition_report()["output_validation"]["measure_validation"]
+            self.assertEqual(measure_report["bad_measures"][0]["skip_reason"], "no time signature")
+
+    def test_duplicate_rest_only_measures_122_128_are_removed_and_reported(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_path = Path(tmpdir)
+            input_path = tmp_path / "duplicates.musicxml"
+            output_path = tmp_path / "duplicates-d.musicxml"
+            input_path.write_text(
+                self.MEASURE_TEMPLATE.format(measures=self.DUPLICATE_122_128_MEASURES),
+                encoding="utf-8",
+            )
+
+            class TargetKey:
+                sharps = 2
+
+            _transpose_musicxml_directly(input_path, output_path, 2, TargetKey(), source_key_name="C major")
+
+            counts = _measure_number_counts(output_path)
+            for number in ["122", "123", "124", "125", "126", "127", "128"]:
+                self.assertEqual(counts[number], 1)
+
+            duplicate_report = get_last_transposition_report()["output_validation"]["duplicate_measure_validation"]
+            self.assertEqual(duplicate_report["duplicate_measures_found"], 7)
+            self.assertEqual(duplicate_report["duplicate_measures_removed"], 7)
+            by_number = {item["measure_number"]: item for item in duplicate_report["duplicates"]}
+            self.assertEqual(by_number["122"]["duplicate_count"], 2)
+            self.assertEqual(by_number["122"]["removed_count"], 1)
+
+    def test_duplicate_real_measures_are_reported_not_removed(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_path = Path(tmpdir)
+            input_path = tmp_path / "duplicate-real.musicxml"
+            output_path = tmp_path / "duplicate-real-d.musicxml"
+            input_path.write_text(
+                self.MEASURE_TEMPLATE.format(measures=self.DUPLICATE_REAL_MEASURES),
+                encoding="utf-8",
+            )
+
+            class TargetKey:
+                sharps = 2
+
+            _transpose_musicxml_directly(input_path, output_path, 2, TargetKey(), source_key_name="C major")
+
+            counts = _measure_number_counts(output_path)
+            self.assertEqual(counts["122"], 2)
+            validation = get_last_transposition_report()["output_validation"]
+            duplicate_report = validation["duplicate_measure_validation"]
+            self.assertEqual(duplicate_report["duplicate_measures_found"], 1)
+            self.assertEqual(duplicate_report["duplicate_measures_removed"], 0)
+            self.assertTrue(duplicate_report["errors"])
+
+    def test_empty_four_staff_measures_receive_staff_specific_rests(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_path = Path(tmpdir)
+            input_path = tmp_path / "empty-staves.musicxml"
+            output_path = tmp_path / "empty-staves-d.musicxml"
+            input_path.write_text(
+                self.MEASURE_TEMPLATE.format(measures=self.EMPTY_FOUR_STAFF_MEASURES),
+                encoding="utf-8",
+            )
+
+            class TargetKey:
+                sharps = 2
+
+            _transpose_musicxml_directly(input_path, output_path, 2, TargetKey(), source_key_name="C major")
+
+            measure_121 = _measure_staff_duration_info(output_path, "121")
+            measure_123 = _measure_staff_duration_info(output_path, "123")
+            self.assertEqual(measure_121, {"1": 32, "2": 32, "3": 32, "4": 32})
+            self.assertEqual(measure_123, {"1": 28, "2": 28, "3": 28, "4": 28})
+            self.assertEqual(_measure_rest_flags(output_path, "121"), ["yes", "yes", "yes", "yes"])
+            self.assertEqual(_measure_rest_flags(output_path, "123"), ["yes", "yes", "yes", "yes"])
+
+            measure_report = get_last_transposition_report()["output_validation"]["measure_validation"]
+            diagnostics = {item["measure_number"]: item for item in measure_report["bad_measures"]}
+            self.assertEqual(measure_report["empty_measures_found"], 8)
+            self.assertEqual(measure_report["empty_staff_measures_repaired"], 32)
+            self.assertEqual(diagnostics["121"]["staff_count"], 4)
+            self.assertEqual(diagnostics["121"]["rests_added_count"], 4)
+            self.assertEqual(diagnostics["121"]["empty_staffs_repaired"], ["1", "2", "3", "4"])
+            self.assertEqual(diagnostics["123"]["expected_duration"], 28)
+            self.assertEqual(diagnostics["123"]["rests_added_count"], 4)
+
     def test_direct_mxl_fallback_transposes_inner_musicxml(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             tmp_path = Path(tmpdir)
@@ -508,6 +800,62 @@ class PipelineTests(unittest.TestCase):
             self.assertEqual(result, output_path)
             export.assert_called_once()
             self.assertTrue(any("MuseScore silent validation/export test: passed" in detail for _name, detail in stages))
+
+    def test_validation_report_warns_about_manual_review_measures(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_path = Path(tmpdir)
+            input_path = tmp_path / "song.musicxml"
+            output_path = tmp_path / "song-in-g.musicxml"
+            stages = []
+            input_path.write_text("<score-partwise />", encoding="utf-8")
+            output_path.write_text("<?xml version=\"1.0\"?><score-partwise />", encoding="utf-8")
+
+            with patch("python.pipeline.detect_key_name", return_value="C major"):
+                with patch("python.pipeline.transpose_to_key", return_value=output_path):
+                    with patch(
+                        "python.pipeline.get_last_transposition_report",
+                        return_value={
+                            "source_key": "C major",
+                            "target_key": "G major",
+                            "interval": 7,
+                            "note_transposition_count": 0,
+                            "key_signature_update_count": 0,
+                            "harmony_chord_update_count": 0,
+                            "visible_key_label_update_count": 0,
+                            "output_validation": {
+                                "xml_valid": True,
+                                "harmony_elements_checked": 0,
+                                "metadata_updated": 0,
+                                "musescore_compatibility_check": "failed",
+                                "duplicate_measure_validation": {
+                                    "duplicate_measures_found": 2,
+                                    "duplicate_measures_removed": 2,
+                                },
+                                "measure_validation": {
+                                    "total_measures_checked": 128,
+                                    "incomplete_measures_found": 7,
+                                    "measures_repaired": 0,
+                                    "measures_skipped_as_intentional": 7,
+                                    "empty_measures_found": 8,
+                                    "empty_staff_measures_repaired": 32,
+                                    "manual_review_measures": ["122-128"],
+                                },
+                            },
+                        },
+                    ):
+                        run_pipeline(
+                            input_path,
+                            output_path,
+                            "G major",
+                            "musicxml",
+                            progress=lambda name, detail="": stages.append((name, detail)),
+                        )
+
+            self.assertTrue(any("Measures 122-128 still need manual review." in detail for _name, detail in stages))
+            self.assertTrue(any("Empty measures found: 8" in detail for _name, detail in stages))
+            self.assertTrue(any("Empty staff measures repaired: 32" in detail for _name, detail in stages))
+            self.assertTrue(any("Duplicate measures found: 2" in detail for _name, detail in stages))
+            self.assertTrue(any("Duplicate measures removed: 2" in detail for _name, detail in stages))
 
     def test_pdf_input_routes_to_conversion_pre_step(self):
         with tempfile.TemporaryDirectory() as tmpdir:
