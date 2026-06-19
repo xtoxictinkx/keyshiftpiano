@@ -4,6 +4,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import xml.etree.ElementTree as ET
 import zipfile
 from unittest.mock import patch
 
@@ -20,6 +21,79 @@ from python.transposer import _transpose_musicxml_directly
 from python.pipeline import run_pipeline
 from python.pdf_conversion import convert_pdf_to_musicxml
 from python.pdf_export import export_musicxml_to_pdf
+
+
+def _xml_local_name(tag: str) -> str:
+    return tag.rsplit("}", 1)[-1]
+
+
+def _find_child(element, name: str):
+    for child in list(element):
+        if _xml_local_name(child.tag) == name:
+            return child
+    return None
+
+
+def _find_children(element, name: str):
+    return [child for child in list(element) if _xml_local_name(child.tag) == name]
+
+
+def _xml_text_values(file_path: Path, element_name: str) -> list[str]:
+    root = ET.parse(file_path).getroot()
+    return [
+        element.text or ""
+        for element in root.iter()
+        if _xml_local_name(element.tag) == element_name
+    ]
+
+
+def _measure_duration_info(file_path: Path, measure_number: str) -> dict:
+    root = ET.parse(file_path).getroot()
+    active_divisions = 1
+    active_beats = 4
+    active_beat_type = 4
+
+    for measure in root.iter():
+        if _xml_local_name(measure.tag) != "measure":
+            continue
+
+        attributes = _find_child(measure, "attributes")
+        if attributes is not None:
+            divisions = _find_child(attributes, "divisions")
+            if divisions is not None and (divisions.text or "").strip():
+                active_divisions = int((divisions.text or "").strip())
+
+            time = _find_child(attributes, "time")
+            if time is not None:
+                beats = _find_child(time, "beats")
+                beat_type = _find_child(time, "beat-type")
+                if beats is not None and (beats.text or "").strip():
+                    active_beats = int((beats.text or "").strip())
+                if beat_type is not None and (beat_type.text or "").strip():
+                    active_beat_type = int((beat_type.text or "").strip())
+
+        if measure.attrib.get("number") != measure_number:
+            continue
+
+        actual_duration = 0
+        rest_count = 0
+        for note_element in _find_children(measure, "note"):
+            if _find_child(note_element, "rest") is not None:
+                rest_count += 1
+            if _find_child(note_element, "chord") is not None or _find_child(note_element, "grace") is not None:
+                continue
+            duration = _find_child(note_element, "duration")
+            if duration is not None and (duration.text or "").strip():
+                actual_duration += int(float((duration.text or "").strip()))
+
+        expected_duration = int(active_divisions * active_beats * 4 / active_beat_type)
+        return {
+            "actual_duration": actual_duration,
+            "expected_duration": expected_duration,
+            "rest_count": rest_count,
+        }
+
+    raise AssertionError(f"Measure {measure_number} was not found.")
 
 
 @unittest.skipIf(stream is None, "music21 is not installed")
@@ -216,8 +290,8 @@ class DirectMusicXmlFallbackTests(unittest.TestCase):
             self.assertIn("<root-step>G</root-step>", output_text)
             self.assertIn("<bass-step>B</bass-step>", output_text)
             self.assertNotIn("<bass-alter>", output_text)
-            self.assertIn("<credit-words>(SATB) Key: C</credit-words>", output_text)
-            self.assertIn("<creator type=\"composer\">Composer Key:C</creator>", output_text)
+            self.assertIn("(SATB) Key: C", _xml_text_values(output_path, "credit-words"))
+            self.assertIn("Composer Key:C", _xml_text_values(output_path, "creator"))
             self.assertIn("<words>Dm</words>", output_text)
             self.assertIn("<lyric><text>G</text></lyric>", output_text)
             report = get_last_transposition_report()
@@ -249,7 +323,7 @@ class DirectMusicXmlFallbackTests(unittest.TestCase):
             require_music21.assert_not_called()
             output_text = output_path.read_text(encoding="utf-8")
             self.assertIn("<root-step>C</root-step>", output_text)
-            self.assertIn("<credit-words>(SATB) Key: C</credit-words>", output_text)
+            self.assertIn("(SATB) Key: C", _xml_text_values(output_path, "credit-words"))
 
     def test_complete_measure_remains_unchanged(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -287,7 +361,9 @@ class DirectMusicXmlFallbackTests(unittest.TestCase):
 
             output_text = output_path.read_text(encoding="utf-8")
             self.assertIn("<rest", output_text)
-            self.assertIn("<duration>2</duration>", output_text)
+            measure_info = _measure_duration_info(output_path, "2")
+            self.assertGreaterEqual(measure_info["rest_count"], 1)
+            self.assertEqual(measure_info["actual_duration"], measure_info["expected_duration"])
             measure_report = get_last_transposition_report()["output_validation"]["measure_validation"]
             self.assertEqual(measure_report["total_measures_checked"], 2)
             self.assertEqual(measure_report["incomplete_measures_found"], 1)
