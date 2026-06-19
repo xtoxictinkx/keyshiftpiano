@@ -8,6 +8,7 @@
   "private": true,
   "scripts": {
     "start": "electron .",
+    "test:js": "node --test tests/*.test.js",
     "test:python": "python -m unittest discover -s tests",
     "build:engine": "pyinstaller --onefile --name transposer --distpath python/dist python/transposer.py",
     "pack": "electron-builder --dir",

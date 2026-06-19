@@ -62,6 +62,20 @@ Install the Python transposition dependency:
 pip install -r requirements.txt
 ```
 
+## Optional PDF Tools
+
+Key Shift Piano can transpose MusicXML/XML files without any extra PDF tools.
+
+If you want to **upload PDF sheet music**, install Audiveris:
+
+- Audiveris OMR engine: https://github.com/Audiveris/audiveris/releases
+
+If you want to **export the transposed result as PDF**, install MuseScore Studio:
+
+- MuseScore Studio: https://musescore.org/en/download
+
+After installing either tool, open **Settings** in Key Shift Piano and click **Find Tools Automatically**. If the app cannot find a tool, use **Browse** beside that tool's executable path.
+
 ## Run The App
 
 ```powershell
@@ -77,7 +91,7 @@ npm start
 5. Click **Shift Key**.
 6. Choose where to save the new file.
 
-For PDF import or PDF export, open **Settings** and save the paths to the Audiveris and MuseScore executables first.
+For PDF import or PDF export, open **Settings** and click **Find Tools Automatically**. The app searches common Windows install locations and Start Menu shortcuts, saves any detected paths, and calls Audiveris or MuseScore automatically during processing. If a tool is not found, use **Browse** beside its executable field and click **Save Settings**.
 
 Temporary conversion files are written only inside the app temp folder. The app never overwrites the original PDF.
 

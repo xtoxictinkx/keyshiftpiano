@@ -83,14 +83,22 @@
           <button id="shift-key" class="primary-action" type="button">Shift Key</button>
 
           <div id="status" class="status" role="status" aria-live="polite"></div>
+          <div id="progress-wrap" class="progress-wrap" hidden>
+            <div class="progress-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-label="Processing progress">
+              <div id="progress-fill" class="progress-fill"></div>
+            </div>
+          </div>
 
           <details class="settings">
             <summary>Settings</summary>
+            <button id="find-tools" type="button" class="secondary-action">Find Tools Automatically</button>
+
             <div class="field-group">
               <label for="audiveris-path">Audiveris executable</label>
               <div class="file-row">
                 <input id="audiveris-path" type="text" placeholder="Required for PDF import">
                 <button id="choose-audiveris" type="button">Browse</button>
+                <button id="test-audiveris" type="button">Test Audiveris</button>
               </div>
             </div>
 
@@ -99,6 +107,7 @@
               <div class="file-row">
                 <input id="musescore-path" type="text" placeholder="Required for PDF export">
                 <button id="choose-musescore" type="button">Browse</button>
+                <button id="test-musescore" type="button">Test MuseScore</button>
               </div>
             </div>
 

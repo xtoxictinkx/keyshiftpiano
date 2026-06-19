@@ -14,9 +14,10 @@ def convert_pdf_to_musicxml(input_path: str | Path, working_dir: str | Path, aud
     if not audiveris_path:
         raise TranspositionError(MISSING_AUDIVERIS_MESSAGE)
 
-    executable = Path(audiveris_path).expanduser()
+    attempted_path = str(audiveris_path).strip().strip("\"'")
+    executable = Path(attempted_path).expanduser()
     if not executable.is_file():
-        raise TranspositionError(MISSING_AUDIVERIS_MESSAGE)
+        raise TranspositionError(f"{MISSING_AUDIVERIS_MESSAGE} Attempted path: {attempted_path}")
 
     source_path = Path(input_path)
     output_dir = Path(working_dir) / "audiveris-output"
@@ -34,12 +35,12 @@ def convert_pdf_to_musicxml(input_path: str | Path, working_dir: str | Path, aud
     try:
         result = subprocess.run(command, capture_output=True, text=True, check=False)
     except OSError as exc:
-        raise TranspositionError("PDF conversion failed. Audiveris could not be started.") from exc
+        raise TranspositionError(f"PDF conversion failed. Audiveris could not be started at: {executable}") from exc
 
     if result.returncode != 0:
         details = (result.stderr or result.stdout or "").strip()
         suffix = f" {details}" if details else ""
-        raise TranspositionError(f"PDF conversion failed. Audiveris could not convert this file.{suffix}")
+        raise TranspositionError(f"PDF conversion failed using Audiveris at: {executable}.{suffix}")
 
     converted_files = [
         path for path in output_dir.rglob("*")
