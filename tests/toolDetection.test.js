@@ -42,10 +42,9 @@ test('known Windows install paths are included', () => {
   assert.ok(candidates.includes('C:\\Program Files\\MuseScore 4\\bin\\MuseScore4.exe'));
 });
 
-test('detectToolPaths finds known Audiveris and MuseScore paths', async () => {
+test('detectToolPaths finds known Audiveris path', async () => {
   const audiverisPath = 'C:\\Program Files\\Audiveris\\Audiveris.exe';
-  const musescorePath = 'C:\\Program Files\\MuseScore 4\\bin\\MuseScore4.exe';
-  const fsModule = createMockFs([audiverisPath, musescorePath]);
+  const fsModule = createMockFs([audiverisPath]);
 
   const result = await detectToolPaths({
     fsModule,
@@ -55,34 +54,47 @@ test('detectToolPaths finds known Audiveris and MuseScore paths', async () => {
   });
 
   assert.equal(result.audiverisPath, audiverisPath);
+});
+
+test('detectToolPaths finds known MuseScore path', async () => {
+  const musescorePath = 'C:\\Program Files\\MuseScore 4\\bin\\MuseScore4.exe';
+  const fsModule = createMockFs([musescorePath]);
+
+  const result = await detectToolPaths({
+    fsModule,
+    env: { ProgramFiles: 'C:\\Program Files' },
+    programRoots: ['C:\\Program Files'],
+    startMenuRoots: []
+  });
+
   assert.equal(result.musescorePath, musescorePath);
 });
 
 test('detectToolPaths resolves Start Menu shortcut targets', async () => {
   const startRoot = 'C:\\ProgramData\\Microsoft\\Windows\\Start Menu\\Programs';
-  const shortcutPath = path.join(startRoot, 'MuseScore Studio.lnk');
-  const musescorePath = 'C:\\Program Files\\MuseScore 4\\bin\\MuseScore4.exe';
+  const shortcutPath = path.join(startRoot, 'Audiveris.lnk');
+  const audiverisPath = 'C:\\Program Files\\Audiveris\\Audiveris.exe';
   const fsModule = createMockFs(
-    [musescorePath],
+    [audiverisPath],
     {
-      [startRoot]: [dirent('MuseScore Studio.lnk', 'file')]
+      [startRoot]: [dirent('Audiveris.lnk', 'file')]
     }
   );
 
   const result = await detectToolPaths({
     fsModule,
     env: { ProgramFiles: 'C:\\Program Files' },
-    programRoots: ['C:\\Program Files'],
+    programRoots: [],
     startMenuRoots: [startRoot],
-    resolveShortcutTarget: async (shortcut) => shortcut === shortcutPath ? musescorePath : ''
+    resolveShortcutTarget: async (shortcut) => shortcut === shortcutPath ? audiverisPath : ''
   });
 
-  assert.equal(result.musescorePath, musescorePath);
+  assert.equal(result.audiverisPath, audiverisPath);
 });
 
 test('classifyExecutable recognizes supported executable names', () => {
   assert.equal(classifyExecutable('C:\\Program Files\\Audiveris\\Audiveris.exe'), 'audiverisPath');
   assert.equal(classifyExecutable('C:\\Program Files\\MuseScore 4\\bin\\MuseScore4.exe'), 'musescorePath');
-  assert.equal(classifyExecutable('C:\\Program Files\\MuseScore 4\\bin\\MuseScoreStudio.exe'), 'musescorePath');
+  assert.equal(classifyExecutable('C:\\Program Files\\MuseScore Studio\\bin\\MuseScoreStudio.exe'), 'musescorePath');
   assert.equal(classifyExecutable('C:\\Other\\Installer.exe'), '');
 });

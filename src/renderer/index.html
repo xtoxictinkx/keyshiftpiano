@@ -73,7 +73,7 @@
           </div>
 
           <div class="field-group">
-            <label for="output-format">Output format</label>
+            <label for="output-format">Save as</label>
             <select id="output-format">
               <option value="musicxml">MusicXML</option>
               <option value="pdf">PDF</option>
@@ -105,11 +105,19 @@
             <div class="field-group">
               <label for="musescore-path">MuseScore executable</label>
               <div class="file-row">
-                <input id="musescore-path" type="text" placeholder="Required for PDF export">
+                <input id="musescore-path" type="text" placeholder="Required for PDF saving">
                 <button id="choose-musescore" type="button">Browse</button>
                 <button id="test-musescore" type="button">Test MuseScore</button>
               </div>
             </div>
+
+            <label class="checkbox-row" for="clean-export-layout">
+              <input id="clean-export-layout" type="checkbox" checked>
+              <span>
+                <strong>Polish PDF page layout</strong>
+                <small>Words and chords are recovered either way.</small>
+              </span>
+            </label>
 
             <button id="save-settings" type="button" class="secondary-action">Save Settings</button>
           </details>

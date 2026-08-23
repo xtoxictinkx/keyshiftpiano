@@ -29,9 +29,7 @@ function getKnownExecutableCandidates(env = process.env) {
   for (const root of roots) {
     candidates.push(path.join(root, 'Audiveris', 'Audiveris.exe'));
     candidates.push(path.join(root, 'MuseScore 4', 'bin', 'MuseScore4.exe'));
-    candidates.push(path.join(root, 'MuseScore Studio 4', 'bin', 'MuseScore4.exe'));
-    candidates.push(path.join(root, 'MuseScore Studio 4', 'bin', 'MuseScoreStudio.exe'));
-    candidates.push(path.join(root, 'MuseScore', 'bin', 'MuseScore4.exe'));
+    candidates.push(path.join(root, 'MuseScore Studio', 'bin', 'MuseScoreStudio.exe'));
   }
 
   return unique(candidates);

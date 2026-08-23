@@ -1,18 +1,18 @@
 {
   "name": "key-shift-piano",
-  "version": "0.1.0",
-  "description": "A local desktop app for transposing piano MusicXML files.",
+  "version": "0.1.5",
+  "description": "A local desktop app for reading and transposing MusicXML and PDF sheet music.",
   "main": "src/main/main.js",
-  "author": "",
+  "author": "Key Shift Piano",
   "license": "MIT",
   "private": true,
   "scripts": {
     "start": "electron .",
     "test:js": "node --test tests/*.test.js",
     "test:python": "python -m unittest discover -s tests",
-    "build:engine": "pyinstaller --onefile --name transposer --distpath python/dist python/transposer.py",
-    "pack": "electron-builder --dir",
-    "dist:win": "electron-builder --win nsis"
+    "build:engine": "node scripts/build-engine.js",
+    "pack": "npm run build:engine && electron-builder --dir",
+    "dist:win": "npm run build:engine && electron-builder --win nsis"
   },
   "devDependencies": {
     "electron": "^31.7.7",
@@ -21,22 +21,24 @@
   "build": {
     "appId": "com.keyshiftpiano.app",
     "productName": "Key Shift Piano",
+    "electronDist": "node_modules/electron/dist",
+    "npmRebuild": false,
     "directories": {
       "output": "dist"
     },
     "files": [
       "src/**/*",
-      "python/**/*",
       "package.json"
     ],
     "extraResources": [
       {
-        "from": "python",
-        "to": "python"
+        "from": "python/dist/transposer.exe",
+        "to": "python/transposer.exe"
       }
     ],
     "win": {
-      "target": "nsis"
+      "target": "nsis",
+      "signAndEditExecutable": false
     },
     "nsis": {
       "oneClick": false,

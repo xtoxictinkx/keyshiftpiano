@@ -1,6 +1,11 @@
 node_modules/
 .venv/
 dist/
+build/
+python/dist/
+output/
+tmp/
+*.spec
 __pycache__/
 *.pyc
 .DS_Store

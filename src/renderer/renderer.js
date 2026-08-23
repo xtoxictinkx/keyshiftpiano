@@ -9,11 +9,12 @@ const progressWrap = document.querySelector('#progress-wrap');
 const progressTrack = document.querySelector('.progress-track');
 const progressFill = document.querySelector('#progress-fill');
 const audiverisPathInput = document.querySelector('#audiveris-path');
-const musescorePathInput = document.querySelector('#musescore-path');
 const chooseAudiverisButton = document.querySelector('#choose-audiveris');
-const chooseMuseScoreButton = document.querySelector('#choose-musescore');
 const testAudiverisButton = document.querySelector('#test-audiveris');
+const musescorePathInput = document.querySelector('#musescore-path');
+const chooseMuseScoreButton = document.querySelector('#choose-musescore');
 const testMuseScoreButton = document.querySelector('#test-musescore');
+const cleanExportLayoutInput = document.querySelector('#clean-export-layout');
 const findToolsButton = document.querySelector('#find-tools');
 const saveSettingsButton = document.querySelector('#save-settings');
 
@@ -22,17 +23,20 @@ let selectedFileType = '';
 let originalKey = '';
 let toolSettings = {
   audiverisPath: '',
-  musescorePath: ''
+  musescorePath: '',
+  cleanExportLayout: true
 };
 
 const STAGE_PROGRESS = {
   'Loading file': 8,
   'Converting PDF to MusicXML': 28,
+  'Recovering PDF words and chords': 36,
+  'Cleaning export layout': 36,
   'Detecting key': 45,
   Transposing: 68,
   'Validation report': 78,
   'Validate Output': 82,
-  'Exporting output': 86,
+  'Exporting output': 90,
   Complete: 100
 };
 
@@ -86,15 +90,19 @@ function isPdfPath(filePath) {
   return /\.pdf$/i.test(filePath || '');
 }
 
+function isPdfOutput() {
+  return outputFormatSelect.value === 'pdf';
+}
+
 function setBusy(isBusy) {
   chooseFileButton.disabled = isBusy;
   shiftButton.disabled = isBusy;
   chooseAudiverisButton.disabled = isBusy;
-  chooseMuseScoreButton.disabled = isBusy;
   testAudiverisButton.disabled = isBusy;
-  testMuseScoreButton.disabled = isBusy;
   findToolsButton.disabled = isBusy;
   saveSettingsButton.disabled = isBusy;
+  chooseMuseScoreButton.disabled = isBusy;
+  testMuseScoreButton.disabled = isBusy;
   shiftButton.textContent = isBusy ? 'Shifting Key...' : 'Shift Key';
 }
 
@@ -104,8 +112,16 @@ function updateProgressForStage(stage) {
 }
 
 function updateModeText() {
-  const pdfInvolved = isPdfPath(selectedFile) || outputFormatSelect.value === 'pdf';
-  pdfNote.hidden = !pdfInvolved;
+  const pdfInvolved = isPdfPath(selectedFile);
+  const pdfOutput = isPdfOutput();
+  pdfNote.hidden = !pdfInvolved && !pdfOutput;
+  if (pdfInvolved && pdfOutput) {
+    pdfNote.textContent = 'PDF import uses Audiveris. PDF saving uses MuseScore Studio in the background.';
+  } else if (pdfInvolved) {
+    pdfNote.textContent = 'PDF import uses the Audiveris OMR engine. Configure it in Settings before importing PDFs.';
+  } else if (pdfOutput) {
+    pdfNote.textContent = 'PDF saving uses MuseScore Studio in the background.';
+  }
 }
 
 function formatStageStatus(stage) {
@@ -115,6 +131,8 @@ function formatStageStatus(stage) {
       return 'Loading file...';
     case 'Converting PDF to MusicXML':
       return 'Converting PDF to MusicXML...';
+    case 'Cleaning export layout':
+      return 'Cleaning up the imported layout...';
     case 'Detecting key':
       return stage.detail ? `Detecting key... ${stage.detail}` : 'Detecting key...';
     case 'Transposing':
@@ -124,7 +142,7 @@ function formatStageStatus(stage) {
     case 'Validate Output':
       return stage.detail ? `Validate Output: ${stage.detail}` : 'Output validation complete.';
     case 'Exporting output':
-      return 'Exporting output with MuseScore... This can take a minute for larger scores.';
+      return 'Exporting output...';
     case 'Complete':
       return `Complete.${detail}`;
     default:
@@ -135,10 +153,6 @@ function formatStageStatus(stage) {
 function getMissingToolMessage() {
   if (isPdfPath(selectedFile) && !toolSettings.audiverisPath) {
     return 'PDF import requires the Audiveris OMR engine. Please configure it in Settings.';
-  }
-
-  if (outputFormatSelect.value === 'pdf' && !toolSettings.musescorePath) {
-    return 'PDF export requires MuseScore.';
   }
 
   return '';
@@ -210,17 +224,8 @@ shiftButton.addEventListener('click', async () => {
       return;
     }
 
-    const requestedPdf = outputFormatSelect.value === 'pdf';
-    const receivedPdf = /\.pdf$/i.test(result.outputPath || '');
-    if (requestedPdf && !receivedPdf) {
-      setStatus(
-        `Transposed MusicXML saved to ${result.outputPath}\nPDF export did not complete. You can open this MusicXML in MuseScore and export PDF manually.`,
-        'success'
-      );
-      return;
-    }
-
-    setStatus(`Saved transposed ${requestedPdf ? 'PDF' : 'MusicXML'} to ${result.outputPath}`, 'success');
+    const outputName = result.outputFormat === 'pdf' ? 'PDF' : 'MusicXML';
+    setStatus(`Saved transposed ${outputName} to ${result.outputPath}`, 'success');
   } catch (error) {
     setStatus(getFriendlyErrorMessage(error, 'The file could not be processed.'), 'error');
     resetProgress();
@@ -236,10 +241,12 @@ async function loadSettings() {
     const settings = await window.keyShiftPiano.getSettings();
     toolSettings = {
       audiverisPath: settings?.audiverisPath || '',
-      musescorePath: settings?.musescorePath || ''
+      musescorePath: settings?.musescorePath || '',
+      cleanExportLayout: settings?.cleanExportLayout !== false
     };
     audiverisPathInput.value = toolSettings.audiverisPath;
     musescorePathInput.value = toolSettings.musescorePath;
+    cleanExportLayoutInput.checked = toolSettings.cleanExportLayout;
   } catch (error) {
     setStatus(getFriendlyErrorMessage(error, 'Settings could not be loaded.'), 'error');
   }
@@ -249,13 +256,15 @@ async function saveSettings(showConfirmation = true) {
   try {
     toolSettings = await window.keyShiftPiano.saveSettings({
       audiverisPath: audiverisPathInput.value,
-      musescorePath: musescorePathInput.value
+      musescorePath: musescorePathInput.value,
+      cleanExportLayout: cleanExportLayoutInput.checked
     });
     audiverisPathInput.value = toolSettings.audiverisPath;
     musescorePathInput.value = toolSettings.musescorePath;
+    cleanExportLayoutInput.checked = toolSettings.cleanExportLayout;
 
     if (showConfirmation) {
-      setStatus('PDF tool settings saved.', 'success');
+      setStatus('Tool settings saved.', 'success');
     }
   } catch (error) {
     setStatus(getFriendlyErrorMessage(error, 'Settings could not be saved.'), 'error');
@@ -302,8 +311,11 @@ async function findToolsAutomatically() {
     toolSettings = result.savedSettings || toolSettings;
     audiverisPathInput.value = toolSettings.audiverisPath || '';
     musescorePathInput.value = toolSettings.musescorePath || '';
-    const foundBoth = Boolean(result.audiverisPath && result.musescorePath);
-    setStatus(result.summary || 'Tool search complete.', foundBoth ? 'success' : 'error');
+    cleanExportLayoutInput.checked = toolSettings.cleanExportLayout !== false;
+    const foundAudiveris = result.audiverisPath ? `Audiveris found: ${result.audiverisPath}` : 'Audiveris not found.';
+    const foundMuseScore = result.musescorePath ? `MuseScore found: ${result.musescorePath}` : 'MuseScore not found.';
+    const hasAnyMissing = !result.audiverisPath || !result.musescorePath;
+    setStatus(`${foundAudiveris} ${foundMuseScore}`, hasAnyMissing ? 'error' : 'success');
   } catch (error) {
     setStatus(getFriendlyErrorMessage(error, 'Automatic tool detection failed.'), 'error');
   } finally {
@@ -312,8 +324,8 @@ async function findToolsAutomatically() {
 }
 
 chooseAudiverisButton.addEventListener('click', () => chooseToolPath('audiveris', audiverisPathInput));
-chooseMuseScoreButton.addEventListener('click', () => chooseToolPath('musescore', musescorePathInput));
 testAudiverisButton.addEventListener('click', () => testToolPath('audiveris', audiverisPathInput));
+chooseMuseScoreButton.addEventListener('click', () => chooseToolPath('musescore', musescorePathInput));
 testMuseScoreButton.addEventListener('click', () => testToolPath('musescore', musescorePathInput));
 findToolsButton.addEventListener('click', findToolsAutomatically);
 saveSettingsButton.addEventListener('click', () => saveSettings(true));

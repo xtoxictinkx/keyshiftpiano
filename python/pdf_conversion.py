@@ -8,6 +8,25 @@ from python.transposer import TranspositionError
 
 MUSICXML_SUFFIXES = {".musicxml", ".xml", ".mxl"}
 MISSING_AUDIVERIS_MESSAGE = "PDF import requires the Audiveris OMR engine. Please configure it in Settings."
+STAFF_NOTATION_REQUIRED_MESSAGE = (
+    "Audiveris could not find readable five-line music staffs in this PDF. "
+    "The file appears to be a chord-and-lyrics chart rather than staff notation, "
+    "which Audiveris cannot convert safely. Please use a MusicXML version of the song "
+    "or a PDF that includes printed staff notation."
+)
+
+
+def _audiveris_failure_message(executable: Path, details: str) -> str:
+    normalized = details.lower()
+    failed_during_scale_detection = (
+        "flagged as invalid" in normalized
+        and ("| scale" in normalized or "created scores: []" in normalized)
+    )
+    if failed_during_scale_detection:
+        return STAFF_NOTATION_REQUIRED_MESSAGE
+
+    suffix = f" {details}" if details else ""
+    return f"PDF conversion failed using Audiveris at: {executable}.{suffix}"
 
 
 def convert_pdf_to_musicxml(input_path: str | Path, working_dir: str | Path, audiveris_path: str | Path | None) -> Path:
@@ -39,8 +58,7 @@ def convert_pdf_to_musicxml(input_path: str | Path, working_dir: str | Path, aud
 
     if result.returncode != 0:
         details = (result.stderr or result.stdout or "").strip()
-        suffix = f" {details}" if details else ""
-        raise TranspositionError(f"PDF conversion failed using Audiveris at: {executable}.{suffix}")
+        raise TranspositionError(_audiveris_failure_message(executable, details))
 
     converted_files = [
         path for path in output_dir.rglob("*")

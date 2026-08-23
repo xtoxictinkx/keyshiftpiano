@@ -3,9 +3,11 @@ const path = require('path');
 const fs = require('fs');
 const { spawn } = require('child_process');
 const { detectToolPaths } = require('./toolDetection');
+const { selectTransposerExecutable } = require('./engineRuntime');
 
-const MUSICXML_EXTENSIONS = new Set(['.musicxml', '.xml']);
-const INPUT_EXTENSIONS = new Set(['.musicxml', '.xml', '.pdf']);
+const MUSICXML_EXTENSIONS = new Set(['.musicxml', '.xml', '.mxl']);
+const MUSICXML_OUTPUT_EXTENSIONS = new Set(['.musicxml', '.xml']);
+const INPUT_EXTENSIONS = new Set([...MUSICXML_EXTENSIONS, '.pdf']);
 const SETTINGS_FILE = 'settings.json';
 
 function getSettingsPath() {
@@ -24,23 +26,25 @@ function readSettings() {
   try {
     const settingsPath = getSettingsPath();
     if (!fs.existsSync(settingsPath)) {
-      return { audiverisPath: '', musescorePath: '' };
+      return { audiverisPath: '', musescorePath: '', cleanExportLayout: true };
     }
 
     const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf-8'));
     return {
       audiverisPath: normalizeExecutablePath(settings.audiverisPath),
-      musescorePath: normalizeExecutablePath(settings.musescorePath)
+      musescorePath: normalizeExecutablePath(settings.musescorePath),
+      cleanExportLayout: settings.cleanExportLayout !== false
     };
   } catch {
-    return { audiverisPath: '', musescorePath: '' };
+    return { audiverisPath: '', musescorePath: '', cleanExportLayout: true };
   }
 }
 
 function saveSettings(settings) {
   const cleanSettings = {
     audiverisPath: normalizeExecutablePath(settings?.audiverisPath),
-    musescorePath: normalizeExecutablePath(settings?.musescorePath)
+    musescorePath: normalizeExecutablePath(settings?.musescorePath),
+    cleanExportLayout: settings?.cleanExportLayout !== false
   };
 
   fs.mkdirSync(app.getPath('userData'), { recursive: true });
@@ -85,7 +89,7 @@ function isValidMusicXmlFile(filePath) {
 function isValidOutputFile(filePath, outputFormat) {
   return outputFormat === 'pdf'
     ? getExtension(filePath) === '.pdf'
-    : isValidMusicXmlFile(filePath);
+    : MUSICXML_OUTPUT_EXTENSIONS.has(getExtension(filePath));
 }
 
 function isExistingFile(filePath) {
@@ -112,13 +116,40 @@ function validateToolSettingsForJob(inputPath, outputFormat, settings) {
 
   if (needsMuseScore) {
     if (!settings.musescorePath) {
-      throw new Error('PDF export requires MuseScore.');
+      throw new Error('PDF saving requires MuseScore Studio. Please configure it in Settings.');
     }
 
     if (!isExistingFile(settings.musescorePath)) {
       throw new Error(`The saved MuseScore path is invalid: ${settings.musescorePath}. Please choose the MuseScore executable in Settings.`);
     }
   }
+}
+
+async function autoFillMissingToolSettings(settings, inputPath, outputFormat) {
+  const needsAudiveris = getExtension(inputPath) === '.pdf';
+  const needsMuseScore = outputFormat === 'pdf';
+  const hasAudiveris = settings.audiverisPath && isExistingFile(settings.audiverisPath);
+  const hasMuseScore = settings.musescorePath && isExistingFile(settings.musescorePath);
+
+  if ((!needsAudiveris || hasAudiveris) && (!needsMuseScore || hasMuseScore)) {
+    return settings;
+  }
+
+  const detected = await detectToolPaths({
+    fsModule: fs,
+    env: process.env,
+    resolveShortcutTarget
+  });
+
+  return saveSettings({
+    audiverisPath: hasAudiveris ? settings.audiverisPath : detected.audiverisPath || settings.audiverisPath,
+    musescorePath: hasMuseScore ? settings.musescorePath : detected.musescorePath || settings.musescorePath,
+    cleanExportLayout: settings.cleanExportLayout
+  });
+}
+
+function getToolDisplayName(toolName) {
+  return toolName === 'musescore' ? 'MuseScore' : 'Audiveris';
 }
 
 function getPythonCommand() {
@@ -137,20 +168,11 @@ function getPythonCommand() {
 }
 
 function getTransposerExecutable() {
-  const packagedExecutable = process.resourcesPath
-    ? path.join(process.resourcesPath, 'python', 'dist', 'transposer.exe')
-    : null;
-
-  if (packagedExecutable && fs.existsSync(packagedExecutable)) {
-    return packagedExecutable;
-  }
-
-  const developmentExecutable = path.join(app.getAppPath(), 'python', 'dist', 'transposer.exe');
-  if (fs.existsSync(developmentExecutable)) {
-    return developmentExecutable;
-  }
-
-  return null;
+  return selectTransposerExecutable({
+    isPackaged: app.isPackaged,
+    resourcesPath: process.resourcesPath,
+    fsModule: fs
+  });
 }
 
 function getTransposerPath() {
@@ -159,6 +181,12 @@ function getTransposerPath() {
 
 function getEngineInvocation(extraArgs) {
   const executablePath = getTransposerExecutable();
+  if (app.isPackaged && !executablePath) {
+    throw new Error(
+      'The bundled transposition engine is missing. Reinstall Key Shift Piano or rebuild the installer.'
+    );
+  }
+
   const python = executablePath ? null : getPythonCommand();
   const command = executablePath || python.command;
   const args = [
@@ -174,6 +202,114 @@ function getAppTempPath() {
   const tempPath = path.join(app.getPath('temp'), 'Key Shift Piano');
   fs.mkdirSync(tempPath, { recursive: true });
   return tempPath;
+}
+
+function getTempMusicXmlPath(outputPath) {
+  const safeName = path.basename(outputPath, path.extname(outputPath)).replace(/[^\w.-]+/g, '-');
+  return path.join(getAppTempPath(), `${safeName}-${Date.now()}.musicxml`);
+}
+
+function getMuseScoreStylePath() {
+  const stylePath = path.join(getAppTempPath(), 'clean-export-layout.mss');
+  const sourceStylePath = path.join(app.getAppPath(), 'src', 'main', 'clean-export-layout.mss');
+  fs.copyFileSync(sourceStylePath, stylePath);
+  return stylePath;
+}
+
+async function waitForStableFile(filePath, timeoutMs = 5000) {
+  const deadline = Date.now() + timeoutMs;
+  let previousSize = -1;
+  let stableChecks = 0;
+
+  while (Date.now() < deadline) {
+    try {
+      const { size } = fs.statSync(filePath);
+      if (size > 0 && size === previousSize) {
+        stableChecks += 1;
+        if (stableChecks >= 2) {
+          return;
+        }
+      } else {
+        stableChecks = 0;
+      }
+      previousSize = size;
+    } catch {
+      stableChecks = 0;
+      previousSize = -1;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+
+  throw new Error(`MuseScore did not finish writing: ${filePath}`);
+}
+
+async function exportMusicXmlToPdfWithMuseScore(musicXmlPath, outputPdfPath, musescorePath, cleanExportLayout = true) {
+  return new Promise((resolve, reject) => {
+    const cleanMuseScorePath = normalizeExecutablePath(musescorePath);
+    const args = cleanExportLayout
+      ? [musicXmlPath, '-S', getMuseScoreStylePath(), '-o', outputPdfPath]
+      : [musicXmlPath, '-o', outputPdfPath];
+    const child = spawn(cleanMuseScorePath, args, {
+      windowsHide: true,
+      env: { ...process.env, QT_LOGGING_RULES: '*.debug=false' }
+    });
+
+    let stdout = '';
+    let stderr = '';
+    let settled = false;
+
+    const timeout = setTimeout(() => {
+      if (settled) {
+        return;
+      }
+
+      settled = true;
+      child.kill();
+      reject(new Error(`PDF saving timed out using MuseScore at: ${cleanMuseScorePath}.`));
+    }, 120000);
+
+    child.stdout.on('data', (data) => {
+      stdout += data.toString();
+    });
+
+    child.stderr.on('data', (data) => {
+      stderr += data.toString();
+    });
+
+    child.on('error', (error) => {
+      if (settled) {
+        return;
+      }
+
+      settled = true;
+      clearTimeout(timeout);
+      reject(new Error(`PDF saving requires MuseScore Studio. Tried: ${cleanMuseScorePath}. ${error.message}`));
+    });
+
+    child.on('close', async (code) => {
+      if (settled) {
+        return;
+      }
+
+      clearTimeout(timeout);
+      if (code === 0 && fs.existsSync(outputPdfPath)) {
+        try {
+          await waitForStableFile(outputPdfPath);
+          settled = true;
+          resolve(outputPdfPath);
+          return;
+        } catch (error) {
+          settled = true;
+          reject(error);
+          return;
+        }
+      }
+
+      settled = true;
+      const detail = (stderr || stdout || `MuseScore exited with code ${code}.`).trim();
+      reject(new Error(`PDF saving failed using MuseScore at: ${cleanMuseScorePath}. ${detail}`));
+    });
+  });
 }
 
 function parseStageLine(line) {
@@ -192,7 +328,7 @@ function getFileTypeLabel(filePath) {
   }
 
   if (MUSICXML_EXTENSIONS.has(extension)) {
-    return extension === '.xml' ? 'XML MusicXML' : 'MusicXML';
+    return extension === '.mxl' ? 'Compressed MusicXML' : extension === '.xml' ? 'XML MusicXML' : 'MusicXML';
   }
 
   return 'Unknown';
@@ -245,10 +381,10 @@ function runTransposer(inputPath, outputPath, targetKey, outputFormat, settings,
       outputFormat,
       '--audiveris-path',
       settings.audiverisPath || '',
-      '--musescore-path',
-      settings.musescorePath || '',
       '--temp-dir',
-      getAppTempPath()
+      getAppTempPath(),
+      '--clean-export-layout',
+      settings.cleanExportLayout === false ? 'false' : 'true'
     ]);
 
     const child = spawn(invocation.command, invocation.args, {
@@ -339,7 +475,6 @@ function formatToolDetectionSummary(detected) {
   if (!detected.audiverisPath) {
     missing.push('Audiveris: install Audiveris, then use Browse or Find Tools Automatically again.');
   }
-
   if (!detected.musescorePath) {
     missing.push('MuseScore: install MuseScore Studio, then use Browse or Find Tools Automatically again.');
   }
@@ -361,7 +496,8 @@ ipcMain.handle('find-tools-automatically', async () => {
 
   const savedSettings = saveSettings({
     audiverisPath: detected.audiverisPath || existingSettings.audiverisPath,
-    musescorePath: detected.musescorePath || existingSettings.musescorePath
+    musescorePath: detected.musescorePath || existingSettings.musescorePath,
+    cleanExportLayout: existingSettings.cleanExportLayout
   });
 
   return {
@@ -373,7 +509,7 @@ ipcMain.handle('find-tools-automatically', async () => {
 
 function testExecutablePath(toolName, filePath) {
   const cleanPath = normalizeExecutablePath(filePath);
-  const displayName = toolName === 'musescore' ? 'MuseScore' : 'Audiveris';
+  const displayName = getToolDisplayName(toolName);
 
   if (!cleanPath) {
     return Promise.resolve({
@@ -451,20 +587,19 @@ function testExecutablePath(toolName, filePath) {
 }
 
 ipcMain.handle('test-tool-path', async (_event, payload) => {
-  const tool = payload?.tool === 'musescore' ? 'musescore' : 'audiveris';
+  const toolName = payload?.tool === 'musescore' ? 'musescore' : 'audiveris';
   const settings = saveSettings({
     ...readSettings(),
-    [tool === 'musescore' ? 'musescorePath' : 'audiverisPath']: payload?.path
+    [toolName === 'musescore' ? 'musescorePath' : 'audiverisPath']: payload?.path
   });
-  const filePath = tool === 'musescore' ? settings.musescorePath : settings.audiverisPath;
-  return testExecutablePath(tool, filePath);
+  return testExecutablePath(toolName, toolName === 'musescore' ? settings.musescorePath : settings.audiverisPath);
 });
 
 ipcMain.handle('choose-tool-path', async (_event, payload) => {
-  const tool = payload?.tool === 'musescore' ? 'musescore' : 'audiveris';
-  const title = tool === 'musescore' ? 'Choose MuseScore Executable' : 'Choose Audiveris Executable';
+  const toolName = payload?.tool === 'musescore' ? 'musescore' : 'audiveris';
+  const displayName = getToolDisplayName(toolName);
   const options = {
-    title,
+    title: `Choose ${displayName} Executable`,
     properties: ['openFile']
   };
 
@@ -486,8 +621,8 @@ ipcMain.handle('select-input-file', async () => {
     title: 'Choose Sheet Music File',
     properties: ['openFile'],
     filters: [
-      { name: 'Supported Files', extensions: ['musicxml', 'xml', 'pdf'] },
-      { name: 'MusicXML Files', extensions: ['musicxml', 'xml'] },
+      { name: 'Supported Files', extensions: ['musicxml', 'xml', 'mxl', 'pdf'] },
+      { name: 'MusicXML Files', extensions: ['musicxml', 'xml', 'mxl'] },
       { name: 'PDF Files', extensions: ['pdf'] }
     ]
   });
@@ -498,7 +633,7 @@ ipcMain.handle('select-input-file', async () => {
 
   const filePath = result.filePaths[0];
   if (!isValidInputFile(filePath)) {
-    throw new Error('Please choose a .musicxml, .xml, or .pdf file.');
+    throw new Error('Please choose a .musicxml, .xml, .mxl, or .pdf file.');
   }
 
   return {
@@ -514,14 +649,14 @@ ipcMain.handle('transpose-file', async (event, payload) => {
   const outputFormat = payload?.outputFormat === 'pdf' ? 'pdf' : 'musicxml';
 
   if (!isValidInputFile(inputPath)) {
-    throw new Error('Please choose a valid .musicxml, .xml, or .pdf file.');
+    throw new Error('Please choose a valid .musicxml, .xml, .mxl, or .pdf file.');
   }
 
   if (!targetKey || typeof targetKey !== 'string') {
     throw new Error('Please choose a target key.');
   }
 
-  const settings = readSettings();
+  const settings = await autoFillMissingToolSettings(readSettings(), inputPath, outputFormat);
   validateToolSettingsForJob(inputPath, outputFormat, settings);
 
   const parsed = path.parse(inputPath);
@@ -547,6 +682,29 @@ ipcMain.handle('transpose-file', async (event, payload) => {
   if (!isValidOutputFile(saveResult.filePath, outputFormat)) {
     const expected = outputFormat === 'pdf' ? '.pdf' : '.musicxml or .xml';
     throw new Error(`Please save the transposed file as ${expected}.`);
+  }
+
+  if (outputFormat === 'pdf') {
+    const intermediateMusicXml = getTempMusicXmlPath(saveResult.filePath);
+    try {
+      await runTransposer(inputPath, intermediateMusicXml, targetKey, 'musicxml', settings, event.sender);
+      event.sender?.send('processing-stage', { type: 'stage', name: 'Exporting output' });
+      const pdfPath = await exportMusicXmlToPdfWithMuseScore(
+        intermediateMusicXml,
+        saveResult.filePath,
+        settings.musescorePath,
+        settings.cleanExportLayout !== false
+      );
+      event.sender?.send('processing-stage', { type: 'stage', name: 'Complete', detail: `Saved ${pdfPath}` });
+      return {
+        canceled: false,
+        outputPath: pdfPath,
+        requestedOutputPath: saveResult.filePath,
+        outputFormat
+      };
+    } finally {
+      fs.rmSync(intermediateMusicXml, { force: true });
+    }
   }
 
   const actualOutputPath = await runTransposer(inputPath, saveResult.filePath, targetKey, outputFormat, settings, event.sender);

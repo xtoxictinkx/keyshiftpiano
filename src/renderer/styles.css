@@ -195,6 +195,32 @@ button:disabled {
   margin-top: 16px;
 }
 
+.checkbox-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-top: 16px;
+  color: var(--text);
+  font-weight: 700;
+}
+
+.checkbox-row input {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--accent);
+}
+
+.checkbox-row strong,
+.checkbox-row small {
+  display: block;
+}
+
+.checkbox-row small {
+  margin-top: 3px;
+  color: var(--muted);
+  font-weight: 500;
+}
+
 .status {
   min-height: 44px;
   margin-top: 18px;

@@ -1,1 +1,2 @@
 music21>=9.1,<10
+pdfplumber>=0.11,<1
