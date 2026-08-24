@@ -1,6 +1,6 @@
 {
   "name": "key-shift-piano",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "description": "A local desktop app for reading and transposing MusicXML and PDF sheet music.",
   "main": "src/main/main.js",
   "author": "Key Shift Piano",
@@ -41,10 +41,15 @@
       "signAndEditExecutable": false
     },
     "nsis": {
-      "oneClick": false,
-      "allowToChangeInstallationDirectory": true,
-      "createDesktopShortcut": true,
-      "createStartMenuShortcut": true
+      "oneClick": true,
+      "perMachine": false,
+      "allowElevation": false,
+      "allowToChangeInstallationDirectory": false,
+      "packElevateHelper": false,
+      "include": "scripts/installer.nsh",
+      "createDesktopShortcut": "always",
+      "createStartMenuShortcut": true,
+      "shortcutName": "Key Shift Piano"
     }
   }
 }

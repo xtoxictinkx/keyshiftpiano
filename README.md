@@ -134,6 +134,10 @@ npm run dist:win
 
 Installer output will be written to `dist/`.
 
+The Windows setup is a one-click per-user installer. It installs under the current
+Windows account without administrator permission, creates Desktop and Start Menu
+shortcuts, and does not write application files to `Program Files`.
+
 For a fully bundled Windows app, install PyInstaller and package normally. The
 packaging commands rebuild the Python engine automatically so a stale engine
 cannot be shipped:
