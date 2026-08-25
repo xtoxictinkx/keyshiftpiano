@@ -8,7 +8,7 @@
   "private": true,
   "scripts": {
     "start": "electron .",
-    "test:js": "node --test tests/*.test.js",
+    "test:js": "node --test tests/engineRuntime.test.js tests/packaging.test.js tests/toolDetection.test.js",
     "test:python": "python -m unittest discover -s tests",
     "build:engine": "node scripts/build-engine.js",
     "pack": "npm run build:engine && electron-builder --dir",
