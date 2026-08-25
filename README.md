@@ -1,10 +1,33 @@
-# Key Shift Piano
+# New Key Scores
 
-Key Shift Piano is a local desktop app for transposing piano sheet music. It uses Electron for the desktop shell and Python with `music21` for the MusicXML transposition engine.
+New Key Scores is a privacy-first desktop app that puts sheet music in the key musicians need. It uses an Electron desktop shell and a local Python engine to transpose MusicXML notation, key signatures, chord symbols, and visible key labels.
 
 Everything runs on the user's computer. The app does not use accounts, cloud uploads, databases, web hosting, subscriptions, cloud OCR, image scanning services, or MIDI playback.
 
-Current beta scope: Key Shift Piano reliably saves transposed MusicXML/XML files and can save PDF output through MuseScore Studio when it is installed locally.
+## Project Status
+
+New Key Scores is currently a **personal alpha** maintained and tested by one person. It is not offered as a public download, and no claims are made about broad adoption or production readiness. The source is public so the implementation and development history can be reviewed while the application is completed.
+
+The current alpha reliably saves transposed MusicXML/XML files in the tested workflows and can save PDF output through MuseScore Studio when it is installed locally. Results from optical music recognition still require careful review.
+
+## Reader And Writer Architecture
+
+New Key Scores owns its desktop interface, processing workflow, direct MusicXML transposition, validation, PDF-text recovery, and score-cleanup logic. It uses established open-source components for specialized file operations:
+
+- Audiveris performs optical music recognition when importing printed PDF notation.
+- MuseScore Studio renders transposed MusicXML as a printable PDF.
+- `music21` is a fallback MusicXML parser and writer for scores the direct engine cannot safely interpret.
+- `pdfplumber` reads embedded PDF text so lyrics, chords, tempo, and rights text can be recovered.
+
+Audiveris and MuseScore are installed separately by the user. Their executables are not bundled with New Key Scores and are not represented as New Key Scores code.
+
+## Privacy
+
+New Key Scores processes selected files locally. It does not create an account, upload sheet music, collect analytics, or send application data to a New Key Scores service. Audiveris and MuseScore are started locally only when their respective PDF features are requested.
+
+## Releases And Code Signing
+
+There is currently no supported public binary release. Personal alpha builds are unsigned and intended only for the maintainer's development and testing computer. A public beta, formal code-signing policy, and code-signing application will be considered only after independent testing and a verifiable public release history exist.
 
 ## Features
 
@@ -43,7 +66,7 @@ PDF import requires a local tool path in **Settings**:
 
 If the Audiveris path is missing, the app shows a clear message and does not change the original file.
 
-PDF saving requires MuseScore Studio. Key Shift Piano calls MuseScore in the background; users do not need to open MuseScore manually.
+PDF saving requires MuseScore Studio. New Key Scores calls MuseScore in the background; users do not need to open MuseScore manually.
 
 ## Prerequisites
 
@@ -76,13 +99,13 @@ pip install -r requirements.txt
 
 ## Optional PDF Tools
 
-Key Shift Piano can transpose MusicXML/XML files without any extra PDF tools.
+New Key Scores can transpose MusicXML/XML files without any extra PDF tools.
 
 If you want to **upload PDF sheet music**, install Audiveris:
 
 - Audiveris OMR engine: https://github.com/Audiveris/audiveris/releases
 
-After installing Audiveris, open **Settings** in Key Shift Piano and click **Find Tools Automatically**. If the app cannot find it, use **Browse** beside the Audiveris executable path.
+After installing Audiveris, open **Settings** in New Key Scores and click **Find Tools Automatically**. If the app cannot find it, use **Browse** beside the Audiveris executable path.
 
 If you want to **save PDF output**, install MuseScore Studio:
 
@@ -92,7 +115,7 @@ The app can find common MuseScore installs automatically from Settings.
 
 The **Polish PDF page layout** setting is enabled by default. It makes PDF imports cleaner and more usable, but it cannot perfectly recreate every layout decision from a published PDF because Audiveris recognition may not preserve the original page design exactly. Turning it off does not disable word or chord recovery.
 
-Image-only PDF recognition is still an OMR process: a printed chord or note that Audiveris does not recognize at all cannot be reconstructed reliably from MusicXML alone. Text-based PDFs receive the additional embedded-text recovery pass. Key Shift Piano transposes every recovered or recognized note and chord, reports ambiguous chord-like text, and preserves the original PDF.
+Image-only PDF recognition is still an OMR process: a printed chord or note that Audiveris does not recognize at all cannot be reconstructed reliably from MusicXML alone. Text-based PDFs receive the additional embedded-text recovery pass. New Key Scores transposes every recovered or recognized note and chord, reports ambiguous chord-like text, and preserves the original PDF.
 
 Audiveris requires visible five-line music staffs. Chord-and-lyrics charts without staff notation cannot be converted safely; use a MusicXML version of the song or a PDF that includes the printed notation.
 
@@ -156,7 +179,7 @@ Development runs the current Python source directly. Packaged releases contain o
 ## Project Structure
 
 ```text
-Key Shift Piano/
+New Key Scores/
   src/
     main/          Electron main process and local Python bridge
     renderer/      App UI

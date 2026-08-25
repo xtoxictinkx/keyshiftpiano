@@ -106,7 +106,7 @@ def run_pipeline(
 
 
 def _get_temp_root(temp_dir: str | Path | None) -> Path:
-    root = Path(temp_dir).expanduser() if temp_dir else Path(tempfile.gettempdir()) / "Key Shift Piano"
+    root = Path(temp_dir).expanduser() if temp_dir else Path(tempfile.gettempdir()) / "New Key Scores"
     root.mkdir(parents=True, exist_ok=True)
     return root
 

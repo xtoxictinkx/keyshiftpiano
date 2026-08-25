@@ -1,6 +1,6 @@
 !macro customInit
   SetShellVarContext current
-  StrCpy $INSTDIR "$LOCALAPPDATA\Programs\Key Shift Piano"
+  StrCpy $INSTDIR "$LOCALAPPDATA\Programs\New Key Scores"
 !macroend
 
 !macro customCheckAppRunning

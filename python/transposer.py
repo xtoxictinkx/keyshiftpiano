@@ -85,8 +85,12 @@ CHORD_TEXT_PATTERN = re.compile(
 )
 MALFORMED_MINOR_SLASH_CHORD_PATTERN = re.compile(r"^([A-G](?:#|b)?)_?m([A-G](?:#|b)?)$")
 MALFORMED_CHORD_TEXT_PATTERN = re.compile(r"\b[A-G](?:#|b)?_+[A-Za-z0-9#b/]*\b")
-RECOVERED_CHORD_LYRIC_NAME = "key-shift-chord"
-MEASURE_NUMBER_RESETS_FIELD = "key-shift-measure-number-resets"
+RECOVERED_CHORD_LYRIC_NAME = "new-key-scores-chord"
+RECOVERED_CHORD_LYRIC_NAMES = {RECOVERED_CHORD_LYRIC_NAME, "key-shift-chord"}
+MEASURE_NUMBER_RESETS_FIELD = "new-key-scores-measure-number-resets"
+MEASURE_NUMBER_RESETS_FIELDS = {MEASURE_NUMBER_RESETS_FIELD, "key-shift-measure-number-resets"}
+PRESERVE_LAYOUT_FIELD = "new-key-scores-preserve-layout"
+PRESERVE_LAYOUT_FIELDS = {PRESERVE_LAYOUT_FIELD, "key-shift-preserve-layout"}
 VISIBLE_TEXT_ELEMENTS = {"words", "credit-words", "rehearsal", "ending"}
 METADATA_TEXT_ELEMENTS = {"creator", "rights", "movement-title", "work-title", "miscellaneous-field"}
 COPYRIGHT_ARTIFACT_KEYWORDS = (
@@ -1749,7 +1753,7 @@ def _recover_chord_lyrics(root) -> dict:
     ambiguous = 0
     for entry in entries:
         lyric = entry["lyric"]
-        already_recovered = lyric.attrib.get("name") == RECOVERED_CHORD_LYRIC_NAME
+        already_recovered = lyric.attrib.get("name") in RECOVERED_CHORD_LYRIC_NAMES
         if entry["chord"] is None:
             continue
         if id(entry) not in confident_ids and not already_recovered:
@@ -1775,7 +1779,7 @@ def _recover_chord_lyrics(root) -> dict:
 def _transpose_recovered_chord_lyrics(root, semitones: int, prefer_flats: bool) -> int:
     updated = 0
     for lyric in _iter_elements(root, "lyric"):
-        if lyric.attrib.get("name") != RECOVERED_CHORD_LYRIC_NAME:
+        if lyric.attrib.get("name") not in RECOVERED_CHORD_LYRIC_NAMES:
             continue
         original = _collect_lyric_text(lyric)
         transposed = _transpose_chord_text(original, semitones, prefer_flats)
@@ -2080,13 +2084,14 @@ def _request_layout_preservation(root) -> None:
             _qualified_child_name(identification, "miscellaneous"),
         )
     for field in _find_children(miscellaneous, "miscellaneous-field"):
-        if field.attrib.get("name") == "key-shift-preserve-layout":
+        if field.attrib.get("name") in PRESERVE_LAYOUT_FIELDS:
+            field.attrib["name"] = PRESERVE_LAYOUT_FIELD
             field.text = "true"
             return
     field = ET.SubElement(
         miscellaneous,
         _qualified_child_name(miscellaneous, "miscellaneous-field"),
-        {"name": "key-shift-preserve-layout"},
+        {"name": PRESERVE_LAYOUT_FIELD},
     )
     field.text = "true"
 
@@ -2116,7 +2121,7 @@ def _store_measure_number_resets(root, resets: list[dict]) -> int:
         (
             candidate
             for candidate in _find_children(miscellaneous, "miscellaneous-field")
-            if candidate.attrib.get("name") == MEASURE_NUMBER_RESETS_FIELD
+            if candidate.attrib.get("name") in MEASURE_NUMBER_RESETS_FIELDS
         ),
         None,
     )
@@ -2126,6 +2131,8 @@ def _store_measure_number_resets(root, resets: list[dict]) -> int:
             _qualified_child_name(miscellaneous, "miscellaneous-field"),
             {"name": MEASURE_NUMBER_RESETS_FIELD},
         )
+    else:
+        field.attrib["name"] = MEASURE_NUMBER_RESETS_FIELD
     field.text = json.dumps(normalized, separators=(",", ":"))
     return len(normalized)
 
@@ -2134,7 +2141,7 @@ def _apply_stored_measure_number_resets(root) -> int:
     fields = [
         field
         for field in _iter_elements(root, "miscellaneous-field")
-        if field.attrib.get("name") == MEASURE_NUMBER_RESETS_FIELD
+        if field.attrib.get("name") in MEASURE_NUMBER_RESETS_FIELDS
     ]
     if not fields:
         return 0
@@ -2173,14 +2180,14 @@ def _apply_stored_measure_number_resets(root) -> int:
 
     for miscellaneous in _iter_elements(root, "miscellaneous"):
         for field in list(_find_children(miscellaneous, "miscellaneous-field")):
-            if field.attrib.get("name") == MEASURE_NUMBER_RESETS_FIELD:
+            if field.attrib.get("name") in MEASURE_NUMBER_RESETS_FIELDS:
                 miscellaneous.remove(field)
     return changed
 
 
 def _layout_preservation_requested(root) -> bool:
     return any(
-        field.attrib.get("name") == "key-shift-preserve-layout"
+        field.attrib.get("name") in PRESERVE_LAYOUT_FIELDS
         and (field.text or "").strip().lower() == "true"
         for field in _iter_elements(root, "miscellaneous-field")
     )
@@ -3580,7 +3587,7 @@ def _element_text(element) -> str:
 def _measure_has_lyric_text(measure) -> bool:
     for note in _find_children(measure, "note"):
         for lyric in _find_children(note, "lyric"):
-            if lyric.attrib.get("name") == RECOVERED_CHORD_LYRIC_NAME:
+            if lyric.attrib.get("name") in RECOVERED_CHORD_LYRIC_NAMES:
                 continue
             text = _find_child(lyric, "text")
             if text is not None and (text.text or "").strip():
@@ -3591,7 +3598,7 @@ def _measure_has_lyric_text(measure) -> bool:
 def _first_lyric_text_element(measure):
     for note in _find_children(measure, "note"):
         for lyric in _find_children(note, "lyric"):
-            if lyric.attrib.get("name") == RECOVERED_CHORD_LYRIC_NAME:
+            if lyric.attrib.get("name") in RECOVERED_CHORD_LYRIC_NAMES:
                 continue
             text = _find_child(lyric, "text")
             if text is not None and (text.text or "").strip():
@@ -3602,7 +3609,7 @@ def _first_lyric_text_element(measure):
 def _first_lyric_note_and_text(measure):
     for note in _find_children(measure, "note"):
         for lyric in _find_children(note, "lyric"):
-            if lyric.attrib.get("name") == RECOVERED_CHORD_LYRIC_NAME:
+            if lyric.attrib.get("name") in RECOVERED_CHORD_LYRIC_NAMES:
                 continue
             text = _find_child(lyric, "text")
             if text is not None and (text.text or "").strip():

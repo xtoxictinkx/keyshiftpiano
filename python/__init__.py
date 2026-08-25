@@ -1,1 +1,1 @@
-"""Local transposition engine for Key Shift Piano."""
+"""Local transposition engine for New Key Scores."""

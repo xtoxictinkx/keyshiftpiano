@@ -11,7 +11,8 @@ import unicodedata
 import xml.etree.ElementTree as ET
 
 
-RECOVERED_CHORD_LYRIC_NAME = "key-shift-chord"
+RECOVERED_CHORD_LYRIC_NAME = "new-key-scores-chord"
+RECOVERED_CHORD_LYRIC_NAMES = {RECOVERED_CHORD_LYRIC_NAME, "key-shift-chord"}
 CHORD_PATTERN = re.compile(
     r"^([A-G](?:#|b)?)"
     r"("
@@ -134,7 +135,7 @@ def _near_white(value) -> bool:
 
 
 def _opaque_white_masks(page) -> list[dict]:
-    cached = getattr(page, "_key_shift_white_masks", None)
+    cached = getattr(page, "_new_key_scores_white_masks", None)
     if cached is not None:
         return cached
     masks = [
@@ -145,7 +146,7 @@ def _opaque_white_masks(page) -> list[dict]:
         and float(rect.get("width") or 0) >= 24
         and float(rect.get("height") or 0) >= 12
     ]
-    setattr(page, "_key_shift_white_masks", masks)
+    setattr(page, "_new_key_scores_white_masks", masks)
     return masks
 
 
@@ -182,11 +183,11 @@ def _pdf_color_to_rgb(value) -> tuple[int, int, int] | None:
 
 
 def _rendered_pdf_page(page):
-    cached = getattr(page, "_key_shift_rendered_page", None)
+    cached = getattr(page, "_new_key_scores_rendered_page", None)
     if cached is not None:
         return cached
     rendered = page.to_image(resolution=144, antialias=True).original.convert("RGB")
-    setattr(page, "_key_shift_rendered_page", rendered)
+    setattr(page, "_new_key_scores_rendered_page", rendered)
     return rendered
 
 
@@ -296,12 +297,12 @@ def _score_page_systems(root) -> list[list[list[str]]]:
 
 
 def _vertical_objects(page) -> list[dict]:
-    cached = getattr(page, "_key_shift_visible_vertical_objects", None)
+    cached = getattr(page, "_new_key_scores_visible_vertical_objects", None)
     if cached is not None:
         return cached
     objects = list(getattr(page, "lines", []) or []) + list(getattr(page, "rects", []) or [])
     visible = _filter_visible_pdf_objects(page, objects, color_key="stroking_color")
-    setattr(page, "_key_shift_visible_vertical_objects", visible)
+    setattr(page, "_new_key_scores_visible_vertical_objects", visible)
     return visible
 
 
@@ -1503,7 +1504,7 @@ def _extract_prominent_pdf_dynamics(
 def _existing_chord_symbols(root) -> list[str]:
     symbols = []
     for lyric in _iter(root, "lyric"):
-        if lyric.attrib.get("name") != RECOVERED_CHORD_LYRIC_NAME:
+        if lyric.attrib.get("name") not in RECOVERED_CHORD_LYRIC_NAMES:
             continue
         text = "".join((element.text or "") for element in _iter(lyric, "text"))
         canonical = _canonicalize_pdf_chord(text)
@@ -1551,12 +1552,12 @@ def _select_chord_part(root):
         recovered = sum(
             1
             for lyric in _iter(part, "lyric")
-            if lyric.attrib.get("name") == RECOVERED_CHORD_LYRIC_NAME
+            if lyric.attrib.get("name") in RECOVERED_CHORD_LYRIC_NAMES
         )
         sung = sum(
             1
             for lyric in _iter(part, "lyric")
-            if lyric.attrib.get("name") != RECOVERED_CHORD_LYRIC_NAME
+            if lyric.attrib.get("name") not in RECOVERED_CHORD_LYRIC_NAMES
         )
         pitched = sum(1 for _pitch in _iter(part, "pitch"))
         score = (recovered, sung, pitched)
@@ -1594,7 +1595,7 @@ def _select_chord_part_for_measures(root, measure_numbers: list[str]):
             1
             for measure in measures
             for lyric in _iter(measure, "lyric")
-            if lyric.attrib.get("name") != RECOVERED_CHORD_LYRIC_NAME and _lyric_text(lyric)
+            if lyric.attrib.get("name") not in RECOVERED_CHORD_LYRIC_NAMES and _lyric_text(lyric)
         )
         existing_chords = sum(
             1
@@ -1662,7 +1663,7 @@ def _remove_existing_score_chords(root) -> int:
     removed = 0
     for note in _iter(root, "note"):
         for lyric in list(_children(note, "lyric")):
-            if lyric.attrib.get("name") == RECOVERED_CHORD_LYRIC_NAME:
+            if lyric.attrib.get("name") in RECOVERED_CHORD_LYRIC_NAMES:
                 note.remove(lyric)
                 removed += 1
     for measure in _iter(root, "measure"):
@@ -2820,7 +2821,7 @@ def _recover_pdf_lyrics(root, pdf, page_systems) -> dict:
                     if measure is None:
                         continue
                     for lyric in _iter(measure, "lyric"):
-                        if lyric.attrib.get("name") == RECOVERED_CHORD_LYRIC_NAME:
+                        if lyric.attrib.get("name") in RECOVERED_CHORD_LYRIC_NAMES:
                             continue
                         if _lyric_text(lyric) and not _is_preserved_lyric_direction(lyric):
                             count += 1
@@ -2862,7 +2863,7 @@ def _recover_pdf_lyrics(root, pdf, page_systems) -> dict:
                     eligible = [
                         lyric
                         for lyric in _children(note, "lyric")
-                        if lyric.attrib.get("name") != RECOVERED_CHORD_LYRIC_NAME
+                        if lyric.attrib.get("name") not in RECOVERED_CHORD_LYRIC_NAMES
                         and not _is_preserved_lyric_direction(lyric)
                     ]
                     if not eligible:
@@ -2927,7 +2928,7 @@ def _recover_pdf_lyrics(root, pdf, page_systems) -> dict:
                         (
                             _lyric_text(lyric)
                             for lyric in _children(note, "lyric")
-                            if lyric.attrib.get("name") != RECOVERED_CHORD_LYRIC_NAME
+                            if lyric.attrib.get("name") not in RECOVERED_CHORD_LYRIC_NAMES
                             and not _is_preserved_lyric_direction(lyric)
                             and _lyric_text(lyric)
                         ),
@@ -2962,7 +2963,7 @@ def _recover_pdf_lyrics(root, pdf, page_systems) -> dict:
                     for note in _children(measure, "note"):
                         for lyric in list(_children(note, "lyric")):
                             if (
-                                lyric.attrib.get("name") == RECOVERED_CHORD_LYRIC_NAME
+                                lyric.attrib.get("name") in RECOVERED_CHORD_LYRIC_NAMES
                                 or not _is_preserved_lyric_direction(lyric)
                             ):
                                 note.remove(lyric)

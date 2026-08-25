@@ -5,8 +5,11 @@ const { spawnSync } = require('child_process');
 
 const projectRoot = path.resolve(__dirname, '..');
 const candidates = [
-  process.env.KEY_SHIFT_PYTHON
-    ? { command: process.env.KEY_SHIFT_PYTHON, prefix: [] }
+  process.env.NEW_KEY_SCORES_PYTHON || process.env.KEY_SHIFT_PYTHON
+    ? {
+      command: process.env.NEW_KEY_SCORES_PYTHON || process.env.KEY_SHIFT_PYTHON,
+      prefix: []
+    }
     : null,
   process.platform === 'win32'
     ? {
@@ -43,12 +46,12 @@ const python = candidates.find(commandExists);
 if (!python) {
   console.error(
     'PyInstaller is not available. Install it with "python -m pip install pyinstaller" ' +
-    'or set KEY_SHIFT_PYTHON to a Python executable that includes PyInstaller.'
+    'or set NEW_KEY_SCORES_PYTHON to a Python executable that includes PyInstaller.'
   );
   process.exit(1);
 }
 
-const buildRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'key-shift-engine-'));
+const buildRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'new-key-scores-engine-'));
 let status = 1;
 
 try {

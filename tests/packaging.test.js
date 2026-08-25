@@ -3,6 +3,13 @@ const test = require('node:test');
 
 const packageJson = require('../package.json');
 
+test('application metadata uses the New Key Scores identity', () => {
+  assert.equal(packageJson.name, 'new-key-scores');
+  assert.equal(packageJson.author, 'New Key Scores');
+  assert.equal(packageJson.build.appId, 'com.newkeyscores.app');
+  assert.equal(packageJson.build.productName, 'New Key Scores');
+});
+
 test('Windows installer is fixed to a non-elevated per-user installation', () => {
   const nsis = packageJson.build.nsis;
 
@@ -14,5 +21,5 @@ test('Windows installer is fixed to a non-elevated per-user installation', () =>
   assert.equal(nsis.include, 'scripts/installer.nsh');
   assert.equal(nsis.createDesktopShortcut, 'always');
   assert.equal(nsis.createStartMenuShortcut, true);
-  assert.equal(nsis.shortcutName, 'Key Shift Piano');
+  assert.equal(nsis.shortcutName, 'New Key Scores');
 });

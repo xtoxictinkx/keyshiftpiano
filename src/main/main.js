@@ -58,7 +58,7 @@ function createWindow() {
     height: 680,
     minWidth: 760,
     minHeight: 560,
-    title: 'Key Shift Piano',
+    title: 'New Key Scores',
     backgroundColor: '#f7f3ec',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -153,8 +153,9 @@ function getToolDisplayName(toolName) {
 }
 
 function getPythonCommand() {
-  if (process.env.KEY_SHIFT_PYTHON) {
-    return { command: process.env.KEY_SHIFT_PYTHON, argsPrefix: [] };
+  const configuredPython = process.env.NEW_KEY_SCORES_PYTHON || process.env.KEY_SHIFT_PYTHON;
+  if (configuredPython) {
+    return { command: configuredPython, argsPrefix: [] };
   }
 
   const venvPython = path.join(app.getAppPath(), '.venv', 'Scripts', 'python.exe');
@@ -183,7 +184,7 @@ function getEngineInvocation(extraArgs) {
   const executablePath = getTransposerExecutable();
   if (app.isPackaged && !executablePath) {
     throw new Error(
-      'The bundled transposition engine is missing. Reinstall Key Shift Piano or rebuild the installer.'
+      'The bundled transposition engine is missing. Reinstall New Key Scores or rebuild the installer.'
     );
   }
 
@@ -199,7 +200,7 @@ function getEngineInvocation(extraArgs) {
 }
 
 function getAppTempPath() {
-  const tempPath = path.join(app.getPath('temp'), 'Key Shift Piano');
+  const tempPath = path.join(app.getPath('temp'), 'New Key Scores');
   fs.mkdirSync(tempPath, { recursive: true });
   return tempPath;
 }

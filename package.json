@@ -1,9 +1,9 @@
 {
-  "name": "key-shift-piano",
+  "name": "new-key-scores",
   "version": "0.1.6",
-  "description": "A local desktop app for reading and transposing MusicXML and PDF sheet music.",
+  "description": "A privacy-first desktop app for transposing MusicXML and PDF sheet music.",
   "main": "src/main/main.js",
-  "author": "Key Shift Piano",
+  "author": "New Key Scores",
   "license": "MIT",
   "private": true,
   "scripts": {
@@ -19,8 +19,8 @@
     "electron-builder": "^26.15.3"
   },
   "build": {
-    "appId": "com.keyshiftpiano.app",
-    "productName": "Key Shift Piano",
+    "appId": "com.newkeyscores.app",
+    "productName": "New Key Scores",
     "electronDist": "node_modules/electron/dist",
     "npmRebuild": false,
     "directories": {
@@ -49,7 +49,7 @@
       "include": "scripts/installer.nsh",
       "createDesktopShortcut": "always",
       "createStartMenuShortcut": true,
-      "shortcutName": "Key Shift Piano"
+      "shortcutName": "New Key Scores"
     }
   }
 }
