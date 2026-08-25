@@ -3,6 +3,7 @@ node_modules/
 dist/
 build/
 python/dist/
+python/runtime/
 output/
 tmp/
 *.spec

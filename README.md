@@ -1,6 +1,6 @@
 # New Key Scores
 
-New Key Scores is a privacy-first desktop app that puts sheet music in the key musicians need. It uses an Electron desktop shell and a local Python engine to transpose MusicXML notation, key signatures, chord symbols, and visible key labels.
+New Key Scores is a privacy-first desktop app that puts sheet music and chord charts in the key musicians need. It uses an Electron desktop shell and a local Python engine to transpose MusicXML notation, key signatures, chord symbols, visible key labels, and digital PDF chord charts.
 
 Everything runs on the user's computer. The app does not use accounts, cloud uploads, databases, web hosting, subscriptions, cloud OCR, image scanning services, or MIDI playback.
 
@@ -8,18 +8,21 @@ Everything runs on the user's computer. The app does not use accounts, cloud upl
 
 New Key Scores is currently a **personal alpha** maintained and tested by one person. It is not offered as a public download, and no claims are made about broad adoption or production readiness. The source is public so the implementation and development history can be reviewed while the application is completed.
 
-The current alpha reliably saves transposed MusicXML/XML files in the tested workflows and can save PDF output through MuseScore Studio when it is installed locally. Results from optical music recognition still require careful review.
+The current alpha reliably saves transposed MusicXML/XML files in the tested workflows, directly reads and writes text-based PDF chord charts, and can save score PDF output through MuseScore Studio when it is installed locally. Results from optical music recognition still require careful review.
 
 ## Reader And Writer Architecture
 
-New Key Scores owns its desktop interface, processing workflow, direct MusicXML transposition, validation, PDF-text recovery, and score-cleanup logic. It uses established open-source components for specialized file operations:
+New Key Scores owns its desktop interface, processing workflow, direct MusicXML transposition, chord-chart detection and transposition, validation, PDF-text recovery, and score-cleanup logic. It uses established open-source components for specialized file operations:
 
 - Audiveris performs optical music recognition when importing printed PDF notation.
 - MuseScore Studio renders transposed MusicXML as a printable PDF.
 - `music21` is a fallback MusicXML parser and writer for scores the direct engine cannot safely interpret.
 - `pdfplumber` reads embedded PDF text so lyrics, chords, tempo, and rights text can be recovered.
+- `pypdf` and `reportlab` preserve a chord chart's original PDF pages while New Key Scores writes the shifted chord symbols.
 
 Audiveris and MuseScore are installed separately by the user. Their executables are not bundled with New Key Scores and are not represented as New Key Scores code.
+
+Personal Windows builds package the readable New Key Scores Python source with a locally staged, validly signed Python Software Foundation runtime. This avoids launching an unsigned PyInstaller child under Windows Smart App Control while code signing is deferred during the personal-alpha phase.
 
 ## Privacy
 
@@ -27,12 +30,13 @@ New Key Scores processes selected files locally. It does not create an account, 
 
 ## Releases And Code Signing
 
-There is currently no supported public binary release. Personal alpha builds are unsigned and intended only for the maintainer's development and testing computer. A public beta, formal code-signing policy, and code-signing application will be considered only after independent testing and a verifiable public release history exist.
+There is currently no supported public binary release. Personal alpha builds are unsigned portable ZIP packages intended only for the maintainer's development and testing computer. Smart App Control prevents a trustworthy unsigned NSIS installer from being built and exercised on this computer, so installation is deferred until code signing is appropriate. A public beta, formal code-signing policy, and code-signing application will be considered only after independent testing and a verifiable public release history exist.
 
 ## Features
 
 - Open `.musicxml`, `.xml`, and compressed `.mxl` MusicXML files
 - Open `.pdf` files through Audiveris OMR PDF-to-MusicXML conversion
+- Read and transpose digital/text-based PDF chord charts while preserving their lyrics and page layout
 - Choose a target key from a simple dropdown
 - Save a new transposed MusicXML file
 - Save PDF output through MuseScore Studio in the background
@@ -40,15 +44,16 @@ There is currently no supported public binary release. Personal alpha builds are
 - Clear file validation and error messages
 - A completion report showing which reader, transposer, and writer engines were used
 - Local Python transposition engine
-- Windows installer configuration through Electron Builder
+- Portable Windows alpha packaging through Electron Builder
 
 ## Current Pipeline
 
 Supported:
 
 ```text
-MusicXML/XML/MXL input -> transpose with music21 -> save MusicXML/XML or PDF
-PDF input -> Audiveris conversion -> transpose with music21 -> save MusicXML/XML or PDF
+MusicXML/XML/MXL input -> New Key Scores direct transposer (music21 fallback) -> save MusicXML/XML or PDF
+Sheet-music PDF input -> Audiveris conversion -> transpose MusicXML -> save MusicXML/XML or PDF
+Text-based chord-chart PDF -> New Key Scores chord reader/transposer/writer -> save PDF
 ```
 
 The code has a small converter layer around this workflow:
@@ -56,26 +61,27 @@ The code has a small converter layer around this workflow:
 - `PDF -> MusicXML` uses Audiveris when a PDF is selected, then reconciles the result with any embedded PDF text layer.
 - `MusicXML -> MusicXML` passes through directly to the transposer.
 - `MusicXML -> PDF` is exported through MuseScore Studio in the background after transposition.
+- `Chord-chart PDF -> PDF` is handled directly by New Key Scores and does not require Audiveris or MuseScore.
 - The default **Polish PDF page layout** setting normalizes Audiveris metadata, removes duplicated first-page title/credit text, cleans repeated staff labels, and applies a MuseScore export style for more readable spacing.
 - When a source PDF contains embedded text, its lyric lines, chord symbols, tempo, title details, and copyright text are recovered from that source and mapped back to the recognized measures. This word-and-chord recovery always runs, even when optional page polishing is disabled.
 - For image-only scans, chord rows that Audiveris stores as lyrics are recovered by staff, system, lyric row, and vertical position before every transposition. Ambiguous single-letter lyric text is left unchanged and reported for review.
 - Transposition uses the nearest octave-equivalent interval, avoiding an unnecessary octave jump (for example, A major to E major moves down a fourth).
 
-PDF import requires a local tool path in **Settings**:
+Staff-notation PDF import requires a local tool path in **Settings**:
 
 - PDF import requires the Audiveris OMR engine.
 
 If the Audiveris path is missing, the app shows a clear message and does not change the original file.
 
-PDF saving requires MuseScore Studio. New Key Scores calls MuseScore in the background; users do not need to open MuseScore manually.
+Score PDF saving requires MuseScore Studio. New Key Scores calls MuseScore in the background; users do not need to open MuseScore manually. Chord-chart PDF saving uses the built-in writer instead.
 
 ## Prerequisites
 
 - Node.js 20 or newer
 - Python 3.10 or newer
 - npm
-- Audiveris OMR engine for PDF import
-- MuseScore Studio for PDF saving
+- Audiveris OMR engine for staff-notation PDF import (optional)
+- MuseScore Studio for score PDF saving (optional)
 
 ## Setup
 
@@ -100,7 +106,7 @@ pip install -r requirements.txt
 
 ## Optional PDF Tools
 
-New Key Scores can transpose MusicXML/XML files without any extra PDF tools.
+New Key Scores can transpose MusicXML/XML files and text-based PDF chord charts without any extra PDF tools.
 
 If you want to **upload PDF sheet music**, install Audiveris:
 
@@ -116,9 +122,9 @@ The app can find common MuseScore installs automatically from Settings.
 
 The **Polish PDF page layout** setting is enabled by default. It makes PDF imports cleaner and more usable, but it cannot perfectly recreate every layout decision from a published PDF because Audiveris recognition may not preserve the original page design exactly. Turning it off does not disable word or chord recovery.
 
-Image-only PDF recognition is still an OMR process: a printed chord or note that Audiveris does not recognize at all cannot be reconstructed reliably from MusicXML alone. Text-based PDFs receive the additional embedded-text recovery pass. New Key Scores transposes every recovered or recognized note and chord, reports ambiguous chord-like text, and preserves the original PDF.
+Image-only PDF recognition is still an OMR process: a printed chord or note that cannot be read from an embedded text layer or recognized by Audiveris cannot be reconstructed reliably. Text-based PDFs receive the additional embedded-text recovery pass. New Key Scores transposes every recovered or recognized note and chord, reports ambiguous chord-like text, and preserves the original PDF.
 
-Audiveris requires visible five-line music staffs. Chord-and-lyrics charts without staff notation cannot be converted safely; use a MusicXML version of the song or a PDF that includes the printed notation.
+Text-based chord-and-lyrics charts without staff notation use the built-in chord-chart reader and writer. Scanned/image-only chord charts still need a future local OCR path and are not treated as safely readable chord charts yet.
 
 ## Run The App
 
@@ -134,7 +140,7 @@ npm start
 4. Click **Shift Key**.
 5. Choose where to save the new MusicXML or PDF file.
 
-For PDF import or PDF saving, open **Settings** and click **Find Tools Automatically**. The app searches common Windows install locations and Start Menu shortcuts, saves detected paths, and calls Audiveris/MuseScore automatically during processing. If a tool is not found, use **Browse** beside its executable field and click **Save Settings**.
+For staff-notation PDF import or score PDF saving, open **Settings** and click **Find Tools Automatically**. The app searches common Windows install locations and Start Menu shortcuts, saves detected paths, and calls Audiveris/MuseScore automatically during processing. Text-based chord-chart PDFs do not require either tool. If a required score tool is not found, use **Browse** beside its executable field and click **Save Settings**.
 
 Temporary conversion files are written only inside the app temp folder. The app never overwrites the original PDF.
 
@@ -146,36 +152,23 @@ With the virtual environment active:
 python -m unittest discover -s tests
 ```
 
-The tests cover the Python transposition function using generated MusicXML when `music21` is installed, MusicXML routing without PDF tools, mocked Audiveris conversion calls, and import cleanup for metadata/staff-label artifacts.
+The tests cover direct and fallback MusicXML transposition, chord-chart PDF detection/writing, staff-PDF separation, routing without unnecessary external tools, mocked Audiveris conversion calls, and import cleanup for metadata/staff-label artifacts.
 
 ## Build Preparation
 
-The project is configured for Electron Builder and can be packaged later as a Windows installer:
+The project is configured for Electron Builder and produces a personal Windows portable ZIP:
 
 ```powershell
 npm run dist:win
 ```
 
-Installer output will be written to `dist/`.
+The ZIP is written to `dist/`. Extract it, then run `New Key Scores.exe` from the extracted folder.
 
-The Windows setup is a one-click per-user installer. It installs under the current
-Windows account without administrator permission, creates Desktop and Start Menu
-shortcuts, and does not write application files to `Program Files`.
+The build stages the readable Python engine source, its local dependencies, and a validly signed Python Software Foundation runtime before creating the ZIP. The generated staging directory is excluded from Git and can be rebuilt from the checked-in source and `requirements.txt`.
 
-Public Windows installers should be Authenticode-signed before release. Windows
-Smart App Control can block a newly built unsigned installer even when local tests pass.
+Public Windows installers should be Authenticode-signed before release. Windows Smart App Control blocks the unsigned NSIS installer's build-time uninstaller step on the maintainer's computer, so the personal alpha deliberately uses the portable ZIP instead of weakening Windows security.
 
-For a fully bundled Windows app, install PyInstaller and package normally. The
-packaging commands rebuild the Python engine automatically so a stale engine
-cannot be shipped:
-
-```powershell
-pip install pyinstaller
-npm run dist:win
-```
-
-Development runs the current Python source directly. Packaged releases contain one rebuilt engine at
-`resources/python/transposer.exe`, preventing stale or duplicate Python copies from being shipped.
+Development runs the current Python source directly. Portable builds contain the staged source under `resources/python-runtime/engine/python/` and launch it through the signed runtime at `resources/python-runtime/python.exe`.
 
 ## Project Structure
 
@@ -184,7 +177,7 @@ New Key Scores/
   src/
     main/          Electron main process and local Python bridge
     renderer/      App UI
-  python/          music21 transposition engine
+  python/          direct MusicXML and chord-chart PDF engines
   scripts/         packaging helpers
   tests/           Python transposition tests
 ```

@@ -3,7 +3,7 @@ const path = require('path');
 const fs = require('fs');
 const { spawn } = require('child_process');
 const { detectToolPaths } = require('./toolDetection');
-const { selectTransposerExecutable } = require('./engineRuntime');
+const { selectPackagedPythonEngine } = require('./engineRuntime');
 const { appendEngineReport } = require('./engineReport');
 
 const MUSICXML_EXTENSIONS = new Set(['.musicxml', '.xml', '.mxl']);
@@ -101,9 +101,10 @@ function isExistingFile(filePath) {
   }
 }
 
-function validateToolSettingsForJob(inputPath, outputFormat, settings) {
-  const needsAudiveris = getExtension(inputPath) === '.pdf';
-  const needsMuseScore = outputFormat === 'pdf';
+function validateToolSettingsForJob(inputPath, outputFormat, settings, inputKind = '') {
+  const isChordChart = inputKind === 'chord-chart-pdf';
+  const needsAudiveris = getExtension(inputPath) === '.pdf' && !isChordChart;
+  const needsMuseScore = outputFormat === 'pdf' && !isChordChart;
 
   if (needsAudiveris) {
     if (!settings.audiverisPath) {
@@ -126,9 +127,10 @@ function validateToolSettingsForJob(inputPath, outputFormat, settings) {
   }
 }
 
-async function autoFillMissingToolSettings(settings, inputPath, outputFormat) {
-  const needsAudiveris = getExtension(inputPath) === '.pdf';
-  const needsMuseScore = outputFormat === 'pdf';
+async function autoFillMissingToolSettings(settings, inputPath, outputFormat, inputKind = '') {
+  const isChordChart = inputKind === 'chord-chart-pdf';
+  const needsAudiveris = getExtension(inputPath) === '.pdf' && !isChordChart;
+  const needsMuseScore = outputFormat === 'pdf' && !isChordChart;
   const hasAudiveris = settings.audiverisPath && isExistingFile(settings.audiverisPath);
   const hasMuseScore = settings.musescorePath && isExistingFile(settings.musescorePath);
 
@@ -169,8 +171,8 @@ function getPythonCommand() {
     : { command: 'python3', argsPrefix: [] };
 }
 
-function getTransposerExecutable() {
-  return selectTransposerExecutable({
+function getPackagedPythonEngine() {
+  return selectPackagedPythonEngine({
     isPackaged: app.isPackaged,
     resourcesPath: process.resourcesPath,
     fsModule: fs
@@ -182,22 +184,26 @@ function getTransposerPath() {
 }
 
 function getEngineInvocation(extraArgs) {
-  const executablePath = getTransposerExecutable();
-  if (app.isPackaged && !executablePath) {
+  const packagedEngine = getPackagedPythonEngine();
+  if (app.isPackaged && !packagedEngine) {
     throw new Error(
       'The bundled transposition engine is missing. Reinstall New Key Scores or rebuild the installer.'
     );
   }
 
-  const python = executablePath ? null : getPythonCommand();
-  const command = executablePath || python.command;
+  const python = packagedEngine || getPythonCommand();
+  const scriptPath = packagedEngine?.scriptPath || getTransposerPath();
   const args = [
-    ...(python?.argsPrefix || []),
-    ...(executablePath ? [] : [getTransposerPath()]),
+    ...(python.argsPrefix || []),
+    scriptPath,
     ...extraArgs
   ];
 
-  return { command, args };
+  return {
+    command: python.command,
+    args,
+    env: packagedEngine ? { PYTHONHOME: packagedEngine.pythonHome } : {}
+  };
 }
 
 function getAppTempPath() {
@@ -354,7 +360,7 @@ function detectOriginalKey(inputPath) {
 
     const child = spawn(invocation.command, invocation.args, {
       windowsHide: true,
-      env: { ...process.env, PYTHONIOENCODING: 'utf-8' }
+      env: { ...process.env, ...invocation.env, PYTHONIOENCODING: 'utf-8' }
     });
 
     let stdout = '';
@@ -366,6 +372,48 @@ function detectOriginalKey(inputPath) {
     child.on('error', () => resolve(null));
     child.on('close', (code) => {
       resolve(code === 0 ? stdout.trim() || null : null);
+    });
+  });
+}
+
+function inspectInputFile(inputPath) {
+  if (getExtension(inputPath) !== '.pdf') {
+    return Promise.resolve({ kind: 'musicxml', original_key: null });
+  }
+
+  return new Promise((resolve, reject) => {
+    const invocation = getEngineInvocation([
+      '--input',
+      inputPath,
+      '--output',
+      inputPath,
+      '--target-key',
+      'C major',
+      '--inspect-input'
+    ]);
+    const child = spawn(invocation.command, invocation.args, {
+      windowsHide: true,
+      env: { ...process.env, ...invocation.env, PYTHONIOENCODING: 'utf-8' }
+    });
+    let stdout = '';
+    let stderr = '';
+    child.stdout.on('data', (data) => {
+      stdout += data.toString();
+    });
+    child.stderr.on('data', (data) => {
+      stderr += data.toString();
+    });
+    child.on('error', (error) => reject(new Error(`The PDF could not be inspected. ${error.message}`)));
+    child.on('close', (code) => {
+      if (code !== 0) {
+        reject(new Error((stderr || 'The PDF could not be inspected.').trim()));
+        return;
+      }
+      try {
+        resolve(JSON.parse(stdout.trim()));
+      } catch {
+        reject(new Error('The PDF inspection result could not be read.'));
+      }
     });
   });
 }
@@ -391,7 +439,7 @@ function runTransposer(inputPath, outputPath, targetKey, outputFormat, settings,
 
     const child = spawn(invocation.command, invocation.args, {
       windowsHide: true,
-      env: { ...process.env, PYTHONIOENCODING: 'utf-8' }
+      env: { ...process.env, ...invocation.env, PYTHONIOENCODING: 'utf-8' }
     });
 
     let stdout = '';
@@ -627,12 +675,12 @@ ipcMain.handle('choose-tool-path', async (_event, payload) => {
 
 ipcMain.handle('select-input-file', async () => {
   const result = await dialog.showOpenDialog({
-    title: 'Choose Sheet Music File',
+    title: 'Choose Score or Chord Chart',
     properties: ['openFile'],
     filters: [
       { name: 'Supported Files', extensions: ['musicxml', 'xml', 'mxl', 'pdf'] },
       { name: 'MusicXML Files', extensions: ['musicxml', 'xml', 'mxl'] },
-      { name: 'PDF Files', extensions: ['pdf'] }
+      { name: 'Sheet Music or Chord Chart PDFs', extensions: ['pdf'] }
     ]
   });
 
@@ -645,10 +693,14 @@ ipcMain.handle('select-input-file', async () => {
     throw new Error('Please choose a .musicxml, .xml, .mxl, or .pdf file.');
   }
 
+  const inspection = getExtension(filePath) === '.pdf'
+    ? await inspectInputFile(filePath)
+    : { kind: 'musicxml', original_key: await detectOriginalKey(filePath) };
   return {
     filePath,
-    fileType: getFileTypeLabel(filePath),
-    originalKey: await detectOriginalKey(filePath)
+    fileType: inspection.kind === 'chord-chart-pdf' ? 'PDF chord chart' : getFileTypeLabel(filePath),
+    inputKind: inspection.kind,
+    originalKey: inspection.original_key || null
   };
 });
 
@@ -665,8 +717,15 @@ ipcMain.handle('transpose-file', async (event, payload) => {
     throw new Error('Please choose a target key.');
   }
 
-  const settings = await autoFillMissingToolSettings(readSettings(), inputPath, outputFormat);
-  validateToolSettingsForJob(inputPath, outputFormat, settings);
+  const inspection = getExtension(inputPath) === '.pdf'
+    ? await inspectInputFile(inputPath)
+    : { kind: 'musicxml' };
+  const inputKind = inspection.kind || 'score-pdf';
+  if (inputKind === 'chord-chart-pdf' && outputFormat !== 'pdf') {
+    throw new Error('Chord charts currently save as PDF so their lyrics and layout remain intact.');
+  }
+  const settings = await autoFillMissingToolSettings(readSettings(), inputPath, outputFormat, inputKind);
+  validateToolSettingsForJob(inputPath, outputFormat, settings, inputKind);
 
   const parsed = path.parse(inputPath);
   const defaultExtension = outputFormat === 'pdf' ? 'pdf' : 'musicxml';
@@ -694,6 +753,23 @@ ipcMain.handle('transpose-file', async (event, payload) => {
   }
 
   if (outputFormat === 'pdf') {
+    if (inputKind === 'chord-chart-pdf') {
+      const transposition = await runTransposer(
+        inputPath,
+        saveResult.filePath,
+        targetKey,
+        'pdf',
+        settings,
+        event.sender
+      );
+      return {
+        canceled: false,
+        outputPath: transposition.outputPath || saveResult.filePath,
+        requestedOutputPath: saveResult.filePath,
+        outputFormat,
+        engineReport: transposition.engineReport
+      };
+    }
     const intermediateMusicXml = getTempMusicXmlPath(saveResult.filePath);
     try {
       const transposition = await runTransposer(

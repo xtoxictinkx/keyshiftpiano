@@ -10,9 +10,9 @@ MUSICXML_SUFFIXES = {".musicxml", ".xml", ".mxl"}
 MISSING_AUDIVERIS_MESSAGE = "PDF import requires the Audiveris OMR engine. Please configure it in Settings."
 STAFF_NOTATION_REQUIRED_MESSAGE = (
     "Audiveris could not find readable five-line music staffs in this PDF. "
-    "The file appears to be a chord-and-lyrics chart rather than staff notation, "
-    "which Audiveris cannot convert safely. Please use a MusicXML version of the song "
-    "or a PDF that includes printed staff notation."
+    "If this is a chord-and-lyrics chart, it does not appear to contain a selectable text layer. "
+    "New Key Scores currently reads digital/text-based chord-chart PDFs, but image-only chord-chart scans "
+    "still need local OCR support. Please use a text-based PDF, MusicXML, or a PDF with printed staff notation."
 )
 
 

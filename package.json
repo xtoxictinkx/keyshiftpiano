@@ -1,6 +1,6 @@
 {
   "name": "new-key-scores",
-  "version": "0.2.0-alpha.1",
+  "version": "0.3.0-alpha.1",
   "description": "A privacy-first desktop app for transposing MusicXML and PDF sheet music.",
   "main": "src/main/main.js",
   "author": "New Key Scores",
@@ -12,7 +12,7 @@
     "test:python": "python -m unittest discover -s tests",
     "build:engine": "node scripts/build-engine.js",
     "pack": "npm run build:engine && electron-builder --dir",
-    "dist:win": "npm run build:engine && electron-builder --win nsis"
+    "dist:win": "npm run build:engine && electron-builder --win zip"
   },
   "devDependencies": {
     "electron": "^43.4.1",
@@ -32,24 +32,13 @@
     ],
     "extraResources": [
       {
-        "from": "python/dist/transposer.exe",
-        "to": "python/transposer.exe"
+        "from": "python/runtime",
+        "to": "python-runtime"
       }
     ],
     "win": {
-      "target": "nsis",
+      "target": "zip",
       "signExecutable": false
-    },
-    "nsis": {
-      "oneClick": true,
-      "perMachine": false,
-      "allowElevation": false,
-      "allowToChangeInstallationDirectory": false,
-      "packElevateHelper": false,
-      "include": "scripts/installer.nsh",
-      "createDesktopShortcut": "always",
-      "createStartMenuShortcut": true,
-      "shortcutName": "New Key Scores"
     }
   }
 }

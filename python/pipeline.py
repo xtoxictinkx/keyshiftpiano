@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 import tempfile
 
+from python.chord_chart import inspect_chord_chart_pdf, transpose_chord_chart_pdf
 from python.converters import convert_source_to_musicxml, expand_mxl_to_musicxml
 from python.transposer import (
     TranspositionError,
@@ -63,6 +64,37 @@ def run_pipeline(
     source_path = validate_input_path(input_path, must_exist=True)
     normalized_format = normalize_output_format(output_format)
     destination_path = validate_output_path(output_path, normalized_format)
+
+    if source_path.suffix.lower() == ".pdf":
+        chart_inspection = inspect_chord_chart_pdf(source_path)
+        if chart_inspection.is_chord_chart:
+            if normalized_format != "pdf":
+                raise TranspositionError(
+                    "Chord-chart PDFs currently save as PDF so their lyrics and layout remain intact."
+                )
+            report("Reading chord chart")
+            if not chart_inspection.original_key:
+                raise TranspositionError(
+                    "The chord chart was recognized, but its original key could not be determined safely."
+                )
+            report("Detecting key", f"Original key: {chart_inspection.original_key}")
+            report("Transposing chord chart")
+            chart_report = transpose_chord_chart_pdf(
+                source_path,
+                destination_path,
+                target_key_name,
+                inspection=chart_inspection,
+            )
+            _report_chord_chart_validation(progress, chart_report)
+            if progress is not None:
+                progress(
+                    "Engine report",
+                    "Input reader: New Key Scores chord-chart PDF reader; "
+                    "Chord transposer: New Key Scores chord-symbol transposer; "
+                    "PDF output: New Key Scores chord-chart PDF writer",
+                )
+            report("Complete", f"Saved {destination_path}")
+            return destination_path
 
     temp_root = _get_temp_root(temp_dir)
 
@@ -137,6 +169,21 @@ def _report_engines(progress, source_path: Path) -> None:
         details.append("Key detection: music21 compatibility fallback")
 
     progress("Engine report", "; ".join(details))
+
+
+def _report_chord_chart_validation(progress, chart_report: dict) -> None:
+    if progress is None:
+        return
+    progress(
+        "Validation report",
+        f"source key: {chart_report.get('source_key', 'unknown')}; "
+        f"key detection: {chart_report.get('source_key_method', 'unknown')}; "
+        f"target key: {chart_report.get('target_key', 'unknown')}; "
+        f"interval: {chart_report.get('interval', 'unknown')}; "
+        f"chords found: {chart_report.get('chords_found', 0)}; "
+        f"chords transposed: {chart_report.get('chords_transposed', 0)}; "
+        "lyrics and page artwork: preserved",
+    )
 
 
 def _report_validation(

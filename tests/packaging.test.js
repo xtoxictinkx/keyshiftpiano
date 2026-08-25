@@ -5,25 +5,18 @@ const packageJson = require('../package.json');
 
 test('application metadata uses the New Key Scores identity', () => {
   assert.equal(packageJson.name, 'new-key-scores');
-  assert.equal(packageJson.version, '0.2.0-alpha.1');
+  assert.equal(packageJson.version, '0.3.0-alpha.1');
   assert.equal(packageJson.author, 'New Key Scores');
   assert.equal(packageJson.build.appId, 'com.newkeyscores.app');
   assert.equal(packageJson.build.productName, 'New Key Scores');
+  assert.deepEqual(packageJson.build.extraResources, [
+    { from: 'python/runtime', to: 'python-runtime' }
+  ]);
 });
 
-test('Windows installer is fixed to a non-elevated per-user installation', () => {
+test('personal Windows alpha is an unsigned portable ZIP', () => {
   assert.equal(packageJson.build.win.signExecutable, false);
   assert.equal(packageJson.build.win.signAndEditExecutable, undefined);
-
-  const nsis = packageJson.build.nsis;
-
-  assert.equal(nsis.oneClick, true);
-  assert.equal(nsis.perMachine, false);
-  assert.equal(nsis.allowElevation, false);
-  assert.equal(nsis.allowToChangeInstallationDirectory, false);
-  assert.equal(nsis.packElevateHelper, false);
-  assert.equal(nsis.include, 'scripts/installer.nsh');
-  assert.equal(nsis.createDesktopShortcut, 'always');
-  assert.equal(nsis.createStartMenuShortcut, true);
-  assert.equal(nsis.shortcutName, 'New Key Scores');
+  assert.equal(packageJson.build.win.target, 'zip');
+  assert.equal(packageJson.build.nsis, undefined);
 });

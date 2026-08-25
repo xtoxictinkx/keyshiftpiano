@@ -4619,6 +4619,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--temp-dir", default="", help="App-owned temp directory for intermediate files.")
     parser.add_argument("--detect-key-only", action="store_true", help="Detect and print the original key only.")
     parser.add_argument(
+        "--inspect-input",
+        action="store_true",
+        help="Print JSON describing whether a PDF is a score or text-based chord chart.",
+    )
+    parser.add_argument(
         "--clean-export-layout",
         choices=["true", "false"],
         default="true",
@@ -4632,8 +4637,35 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     try:
+        if args.inspect_input:
+            input_path = Path(args.input)
+            if input_path.suffix.lower() == ".pdf":
+                from python.chord_chart import inspect_chord_chart_pdf
+
+                print(json.dumps(inspect_chord_chart_pdf(input_path).as_dict()))
+            else:
+                print(
+                    json.dumps(
+                        {
+                            "kind": "musicxml",
+                            "original_key": detect_key_name(input_path),
+                            "key_source": "MusicXML",
+                        }
+                    )
+                )
+            return 0
+
         if args.detect_key_only:
-            print(detect_key_name(args.input))
+            input_path = Path(args.input)
+            if input_path.suffix.lower() == ".pdf":
+                from python.chord_chart import inspect_chord_chart_pdf
+
+                inspection = inspect_chord_chart_pdf(input_path)
+                if not inspection.is_chord_chart or not inspection.original_key:
+                    raise TranspositionError("The PDF key could not be detected before conversion.")
+                print(inspection.original_key)
+            else:
+                print(detect_key_name(input_path))
             return 0
 
         from python.pipeline import run_pipeline

@@ -1,7 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 
-function selectTransposerExecutable({
+function selectPackagedPythonEngine({
   isPackaged,
   resourcesPath,
   fsModule = fs
@@ -10,15 +10,15 @@ function selectTransposerExecutable({
     return null;
   }
 
-  const executablePath = path.join(
-    resourcesPath,
-    'python',
-    'transposer.exe'
-  );
+  const runtimeRoot = path.join(resourcesPath, 'python-runtime');
+  const command = path.join(runtimeRoot, 'python.exe');
+  const scriptPath = path.join(runtimeRoot, 'engine', 'python', 'transposer.py');
 
-  return fsModule.existsSync(executablePath) ? executablePath : null;
+  return fsModule.existsSync(command) && fsModule.existsSync(scriptPath)
+    ? { command, scriptPath, pythonHome: runtimeRoot }
+    : null;
 }
 
 module.exports = {
-  selectTransposerExecutable
+  selectPackagedPythonEngine
 };

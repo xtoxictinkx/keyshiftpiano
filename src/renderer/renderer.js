@@ -22,6 +22,7 @@ const saveSettingsButton = document.querySelector('#save-settings');
 
 let selectedFile = '';
 let selectedFileType = '';
+let selectedInputKind = '';
 let originalKey = '';
 let toolSettings = {
   audiverisPath: '',
@@ -31,11 +32,13 @@ let toolSettings = {
 
 const STAGE_PROGRESS = {
   'Loading file': 8,
+  'Reading chord chart': 28,
   'Converting PDF to MusicXML': 28,
   'Recovering PDF words and chords': 36,
   'Cleaning export layout': 36,
   'Detecting key': 45,
   Transposing: 68,
+  'Transposing chord chart': 68,
   'Validation report': 78,
   'Validate Output': 82,
   'Engine report': 86,
@@ -138,6 +141,11 @@ function updateProgressForStage(stage) {
 function updateModeText() {
   const pdfInvolved = isPdfPath(selectedFile);
   const pdfOutput = isPdfOutput();
+  if (selectedInputKind === 'chord-chart-pdf') {
+    pdfNote.hidden = false;
+    pdfNote.textContent = 'Chord chart detected. New Key Scores will preserve the lyrics and layout and change the chord symbols directly.';
+    return;
+  }
   pdfNote.hidden = !pdfInvolved && !pdfOutput;
   if (pdfInvolved && pdfOutput) {
     pdfNote.textContent = 'PDF import uses Audiveris. PDF saving uses MuseScore Studio in the background.';
@@ -153,6 +161,8 @@ function formatStageStatus(stage) {
   switch (stage?.name) {
     case 'Loading file':
       return 'Loading file...';
+    case 'Reading chord chart':
+      return 'Reading chord symbols and chart layout...';
     case 'Converting PDF to MusicXML':
       return 'Converting PDF to MusicXML...';
     case 'Cleaning export layout':
@@ -161,6 +171,8 @@ function formatStageStatus(stage) {
       return stage.detail ? `Detecting key... ${stage.detail}` : 'Detecting key...';
     case 'Transposing':
       return 'Transposing...';
+    case 'Transposing chord chart':
+      return 'Transposing the chord chart...';
     case 'Validation report':
       return stage.detail ? `Validation report: ${stage.detail}` : 'Validation report complete.';
     case 'Validate Output':
@@ -177,6 +189,9 @@ function formatStageStatus(stage) {
 }
 
 function getMissingToolMessage() {
+  if (selectedInputKind === 'chord-chart-pdf') {
+    return '';
+  }
   if (isPdfPath(selectedFile) && !toolSettings.audiverisPath) {
     return 'PDF import requires the Audiveris OMR engine. Please configure it in Settings.';
   }
@@ -197,6 +212,7 @@ chooseFileButton.addEventListener('click', async () => {
     if (!isValidInputPath(filePath)) {
       selectedFile = '';
       selectedFileType = '';
+      selectedInputKind = '';
       originalKey = '';
       fileInput.value = '';
       setStatus('Please choose a .musicxml, .xml, .mxl, or .pdf file.', 'error');
@@ -205,8 +221,15 @@ chooseFileButton.addEventListener('click', async () => {
 
     selectedFile = filePath;
     selectedFileType = fileInfo.fileType || '';
+    selectedInputKind = fileInfo.inputKind || '';
     originalKey = fileInfo.originalKey || '';
     fileInput.value = filePath;
+    if (selectedInputKind === 'chord-chart-pdf') {
+      outputFormatSelect.value = 'pdf';
+      outputFormatSelect.disabled = true;
+    } else {
+      outputFormatSelect.disabled = false;
+    }
     updateModeText();
 
     const fileDescription = describeSelectedFile();
@@ -216,9 +239,11 @@ chooseFileButton.addEventListener('click', async () => {
       return;
     }
 
-    setStatus(isPdfPath(filePath)
-      ? `${fileDescription} Audiveris will convert it before transposition.`
-      : `${fileDescription} Ready to shift this MusicXML file.`);
+    setStatus(selectedInputKind === 'chord-chart-pdf'
+      ? `${fileDescription} Ready to shift this chord chart and preserve its PDF layout.`
+      : isPdfPath(filePath)
+        ? `${fileDescription} Audiveris will convert it before transposition.`
+        : `${fileDescription} Ready to shift this MusicXML file.`);
   } catch (error) {
     setStatus(getFriendlyErrorMessage(error, 'The file could not be selected.'), 'error');
   }

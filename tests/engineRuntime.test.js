@@ -2,7 +2,7 @@ const assert = require('node:assert/strict');
 const test = require('node:test');
 const path = require('node:path');
 
-const { selectTransposerExecutable } = require('../src/main/engineRuntime');
+const { selectPackagedPythonEngine } = require('../src/main/engineRuntime');
 
 test('development ignores a stale built transposer executable', () => {
   const resourcesPath = 'C:\\project\\resources';
@@ -10,7 +10,7 @@ test('development ignores a stale built transposer executable', () => {
   const fsModule = { existsSync: (candidate) => candidate === expected };
 
   assert.equal(
-    selectTransposerExecutable({
+    selectPackagedPythonEngine({
       isPackaged: false,
       resourcesPath,
       fsModule
@@ -19,17 +19,19 @@ test('development ignores a stale built transposer executable', () => {
   );
 });
 
-test('packaged app uses its bundled transposer executable', () => {
+test('packaged app uses its signed Python runtime and bundled source', () => {
   const resourcesPath = 'C:\\app\\resources';
-  const expected = path.join(resourcesPath, 'python', 'transposer.exe');
-  const fsModule = { existsSync: (candidate) => candidate === expected };
+  const runtimeRoot = path.join(resourcesPath, 'python-runtime');
+  const command = path.join(runtimeRoot, 'python.exe');
+  const scriptPath = path.join(runtimeRoot, 'engine', 'python', 'transposer.py');
+  const fsModule = { existsSync: (candidate) => candidate === command || candidate === scriptPath };
 
-  assert.equal(
-    selectTransposerExecutable({
+  assert.deepEqual(
+    selectPackagedPythonEngine({
       isPackaged: true,
       resourcesPath,
       fsModule
     }),
-    expected
+    { command, scriptPath, pythonHome: runtimeRoot }
   );
 });
