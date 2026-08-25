@@ -1,12 +1,13 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from io import BytesIO
 from pathlib import Path
 import re
 
 import pdfplumber
 from pypdf import PdfReader, PdfWriter
+from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfgen import canvas
 
 from python.transposer import (
@@ -20,7 +21,7 @@ from python.transposer import (
 
 
 KEY_PATTERN = re.compile(
-    r"(?i)\bkey\s*:?\s*([A-G](?:#|b|♯|♭)?)(?:\s*(major|minor|m))?\b"
+    r"(?i)\bkey\s*(?:[:\-\u2013\u2014]\s*)?([A-G](?:#|b|♯|♭)?)(?:\s*(major|minor|m))?\b"
 )
 SECTION_WORDS = {
     "bridge",
@@ -48,6 +49,18 @@ class ChordOccurrence:
     bottom: float
     text: str
     chord: str
+    font_size: float
+    right_limit: float | None = None
+
+
+@dataclass(frozen=True)
+class ReplacementLayout:
+    mask_x: float
+    mask_y: float
+    mask_width: float
+    mask_height: float
+    text_x: float
+    text_y: float
     font_size: float
 
 
@@ -86,6 +99,11 @@ def _unwrap_chord_token(text: str) -> tuple[str, str, str] | None:
     while value and value[0] in LEADING_WRAPPERS:
         leading += value[0]
         value = value[1:]
+
+    # N.C. is a complete symbol, not a chord followed by punctuation.
+    if re.fullmatch(r"(?i)N\.C\.", value):
+        return leading, "N.C.", ""
+
     while value and value[-1] in TRAILING_WRAPPERS:
         trailing = value[-1] + trailing
         value = value[:-1]
@@ -283,12 +301,19 @@ def inspect_chord_chart_pdf(input_path: str | Path) -> ChordChartInspection:
                     meaningful = [word for word in line if re.search(r"[A-Za-z0-9]", str(word.get("text", "")))]
                     has_section_label = any(_is_section_word(str(word.get("text", ""))) for word in line)
                     chord_row = (
-                        len(candidates) >= 2 and len(candidates) / max(1, len(meaningful)) >= 0.45
+                        len(candidates) >= 2 and len(candidates) / max(1, len(meaningful)) >= 0.30
                     ) or (
                         len(candidates) == 1 and (len(meaningful) == 1 or has_section_label or key_value is not None)
                     )
                     if chord_row:
-                        occurrences.extend(candidates)
+                        for candidate in candidates:
+                            following_x = [
+                                float(word.get("x0", 0))
+                                for word in line
+                                if float(word.get("x0", 0)) > candidate.x0 + 0.5
+                            ]
+                            right_limit = min(following_x) if following_x else None
+                            occurrences.append(replace(candidate, right_limit=right_limit))
     except Exception:
         return ChordChartInspection(
             kind="score-pdf",
@@ -323,19 +348,59 @@ def inspect_chord_chart_pdf(input_path: str | Path) -> ChordChartInspection:
     )
 
 
+def _replacement_layout(
+    width: float,
+    height: float,
+    occurrence: ChordOccurrence,
+    shifted: str,
+) -> ReplacementLayout:
+    font_name = "Helvetica-Bold"
+    right_limit = occurrence.right_limit if occurrence.right_limit is not None else width - 18.0
+    available_width = max(1.0, right_limit - occurrence.x0 - 0.8)
+    natural_width = pdfmetrics.stringWidth(shifted, font_name, occurrence.font_size)
+    font_size = occurrence.font_size
+    if natural_width > available_width:
+        font_size = max(6.0, occurrence.font_size * available_width / natural_width)
+
+    # The PDF's word boxes overlap the lyric line below even though the visible
+    # glyphs do not. Mask only the chord's ink band so nearby lyrics and suffixes
+    # such as "sus" remain untouched.
+    vertical_inset_top = max(0.45, occurrence.font_size * 0.035)
+    vertical_inset_bottom = max(1.25, occurrence.font_size * 0.10)
+    mask_top = occurrence.top + vertical_inset_top
+    mask_bottom = max(mask_top + 1.0, occurrence.bottom - vertical_inset_bottom)
+    mask_right = occurrence.x1
+    if occurrence.right_limit is not None:
+        mask_right = min(mask_right, occurrence.right_limit)
+
+    return ReplacementLayout(
+        mask_x=occurrence.x0 - 0.15,
+        mask_y=height - mask_bottom,
+        mask_width=max(0.5, mask_right - occurrence.x0 + 0.15),
+        mask_height=mask_bottom - mask_top,
+        text_x=occurrence.x0,
+        text_y=height - occurrence.bottom + occurrence.font_size * 0.20,
+        font_size=font_size,
+    )
+
+
 def _overlay_for_page(width: float, height: float, replacements: list[tuple[ChordOccurrence, str]]) -> BytesIO:
     packet = BytesIO()
     pdf = canvas.Canvas(packet, pagesize=(width, height))
     for occurrence, shifted in replacements:
-        box_height = max(occurrence.bottom - occurrence.top, occurrence.font_size * 1.05)
-        x = occurrence.x0 - 1.0
-        y = height - occurrence.bottom - 1.0
-        box_width = max(occurrence.x1 - occurrence.x0 + 4.0, occurrence.font_size * len(shifted) * 0.62 + 3.0)
+        layout = _replacement_layout(width, height, occurrence, shifted)
         pdf.setFillColorRGB(1, 1, 1)
-        pdf.rect(x, y, box_width, box_height + 3.0, stroke=0, fill=1)
+        pdf.rect(
+            layout.mask_x,
+            layout.mask_y,
+            layout.mask_width,
+            layout.mask_height,
+            stroke=0,
+            fill=1,
+        )
         pdf.setFillColorRGB(0, 0, 0)
-        pdf.setFont("Helvetica-Bold", occurrence.font_size)
-        pdf.drawString(occurrence.x0, height - occurrence.bottom + max(0.5, occurrence.font_size * 0.08), shifted)
+        pdf.setFont("Helvetica-Bold", layout.font_size)
+        pdf.drawString(layout.text_x, layout.text_y, shifted)
     pdf.save()
     packet.seek(0)
     return packet

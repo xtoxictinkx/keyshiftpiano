@@ -5,7 +5,7 @@ const packageJson = require('../package.json');
 
 test('application metadata uses the New Key Scores identity', () => {
   assert.equal(packageJson.name, 'new-key-scores');
-  assert.equal(packageJson.version, '0.3.0-alpha.1');
+  assert.equal(packageJson.version, '0.3.0-alpha.2');
   assert.equal(packageJson.author, 'New Key Scores');
   assert.equal(packageJson.build.appId, 'com.newkeyscores.app');
   assert.equal(packageJson.build.productName, 'New Key Scores');

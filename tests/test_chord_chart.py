@@ -3,10 +3,13 @@ import tempfile
 import unittest
 
 import pdfplumber
+from reportlab.pdfbase import pdfmetrics
 from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
 
 from python.chord_chart import (
+    ChordOccurrence,
+    _replacement_layout,
     _transpose_wrapped_chord,
     inspect_chord_chart_pdf,
     transpose_chord_chart_pdf,
@@ -20,7 +23,7 @@ def create_chord_chart(path: Path) -> None:
     pdf.setFont("Helvetica-Bold", 18)
     pdf.drawString(72, 735, "Example Song")
     pdf.setFont("Helvetica", 11)
-    pdf.drawString(72, 710, "Key: G")
+    pdf.drawString(72, 710, "Key - G")
     pdf.setFont("Helvetica-Bold", 12)
     pdf.drawString(72, 670, "G        D        Em       C")
     pdf.setFont("Helvetica", 11)
@@ -29,6 +32,10 @@ def create_chord_chart(path: Path) -> None:
     pdf.drawString(72, 615, "G/B      C        D        G")
     pdf.setFont("Helvetica", 11)
     pdf.drawString(72, 597, "Love will lead me safely home")
+    pdf.setFont("Helvetica-Bold", 12)
+    pdf.drawString(72, 575, "Em       Dsus")
+    pdf.setFont("Helvetica-Oblique", 11)
+    pdf.drawString(250, 575, "(To Ch. 1)")
     pdf.save()
 
 
@@ -47,6 +54,28 @@ class ChordChartTests(unittest.TestCase):
     def test_wrapped_chord_symbols_preserve_barlines(self):
         self.assertEqual(_transpose_wrapped_chord("|:G/B|", 2, False), "|:A/C#|")
 
+    def test_no_chord_symbol_does_not_gain_an_extra_period(self):
+        self.assertEqual(_transpose_wrapped_chord("N.C.", 2, False), "N.C.")
+
+    def test_replacement_mask_stays_clear_of_the_lyric_line_and_fits_its_slot(self):
+        occurrence = ChordOccurrence(
+            page_index=0,
+            x0=100,
+            x1=128,
+            top=100,
+            bottom=115,
+            text="G/B",
+            chord="G/B",
+            font_size=15,
+            right_limit=132,
+        )
+
+        layout = _replacement_layout(612, 792, occurrence, "A/C#")
+        mask_bottom_from_top = 792 - layout.mask_y
+        rendered_width = pdfmetrics.stringWidth("A/C#", "Helvetica-Bold", layout.font_size)
+        self.assertLess(mask_bottom_from_top, occurrence.bottom)
+        self.assertLessEqual(rendered_width, occurrence.right_limit - occurrence.x0)
+
     def test_text_pdf_is_detected_and_transposed_without_external_tools(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
@@ -59,6 +88,7 @@ class ChordChartTests(unittest.TestCase):
             self.assertEqual(inspection.original_key, "G major")
             self.assertEqual(inspection.key_source, "printed key label")
             self.assertGreaterEqual(inspection.chord_count, 9)
+            self.assertIn("Dsus", [occurrence.chord for occurrence in inspection.occurrences])
 
             report = transpose_chord_chart_pdf(source, output, "D major", inspection=inspection)
             self.assertEqual(report["engine"], "new-key-scores-chord-chart")
