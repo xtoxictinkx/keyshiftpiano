@@ -38,6 +38,7 @@ There is currently no supported public binary release. Personal alpha builds are
 - Save PDF output through MuseScore Studio in the background
 - Clean Audiveris layout artifacts before PDF export
 - Clear file validation and error messages
+- A completion report showing which reader, transposer, and writer engines were used
 - Local Python transposition engine
 - Windows installer configuration through Electron Builder
 

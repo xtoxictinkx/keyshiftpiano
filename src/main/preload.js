@@ -1,6 +1,6 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
-contextBridge.exposeInMainWorld('keyShiftPiano', {
+contextBridge.exposeInMainWorld('newKeyScores', {
   selectFile: (payload) => ipcRenderer.invoke('select-input-file', payload),
   transposeFile: (payload) => ipcRenderer.invoke('transpose-file', payload),
   getSettings: () => ipcRenderer.invoke('get-settings'),

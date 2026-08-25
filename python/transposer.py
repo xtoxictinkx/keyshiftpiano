@@ -217,6 +217,7 @@ def transpose_to_key(input_path: str | Path, output_path: str | Path, target_key
                 semitones,
                 target_key,
                 source_key_name=f"{source_key.tonic.name} {source_key.mode}",
+                key_detection_engine="music21",
             )
         except Exception as direct_exc:
             try:
@@ -224,6 +225,8 @@ def transpose_to_key(input_path: str | Path, output_path: str | Path, target_key
                 _set_initial_key_signatures(shifted_score, target_key)
                 shifted_score.write("musicxml", fp=str(destination_path))
                 LAST_TRANSPOSITION_REPORT = {
+                    "engine": "music21-fallback",
+                    "key_detection_engine": "music21",
                     "source_key": f"{source_key.tonic.name} {source_key.mode}",
                     "target_key": _target_key_name(target_key),
                     "interval": semitones,
@@ -4405,11 +4408,19 @@ def _transpose_musicxml_directly(
     semitones: int | float,
     target_key,
     source_key_name: str = "unknown",
+    key_detection_engine: str = "new-key-scores-direct",
 ) -> Path:
     global LAST_TRANSPOSITION_REPORT
 
     if input_path.suffix.lower() == ".mxl":
-        return _transpose_mxl_directly(input_path, output_path, semitones, target_key, source_key_name=source_key_name)
+        return _transpose_mxl_directly(
+            input_path,
+            output_path,
+            semitones,
+            target_key,
+            source_key_name=source_key_name,
+            key_detection_engine=key_detection_engine,
+        )
 
     ET.register_namespace("", "http://www.musicxml.org/ns/musicxml")
     tree = ET.parse(input_path)
@@ -4514,6 +4525,8 @@ def _transpose_musicxml_directly(
         rendering_artifact_report=rendering_artifact_report,
     )
     LAST_TRANSPOSITION_REPORT = {
+        "engine": "new-key-scores-direct",
+        "key_detection_engine": key_detection_engine,
         "source_key": source_key_name,
         "target_key": _target_key_name(target_key),
         "interval": semitone_delta,
@@ -4557,6 +4570,7 @@ def _transpose_mxl_directly(
     semitones: int | float,
     target_key,
     source_key_name: str = "unknown",
+    key_detection_engine: str = "new-key-scores-direct",
 ) -> Path:
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -4565,7 +4579,14 @@ def _transpose_mxl_directly(
         root_xml = source_zip.read(rootfile_path)
         temp_xml_path = output_path.with_suffix(".fallback.musicxml")
         temp_xml_path.write_bytes(root_xml)
-        _transpose_musicxml_directly(temp_xml_path, temp_xml_path, semitones, target_key, source_key_name=source_key_name)
+        _transpose_musicxml_directly(
+            temp_xml_path,
+            temp_xml_path,
+            semitones,
+            target_key,
+            source_key_name=source_key_name,
+            key_detection_engine=key_detection_engine,
+        )
         transposed_xml = temp_xml_path.read_bytes()
         temp_xml_path.unlink(missing_ok=True)
 

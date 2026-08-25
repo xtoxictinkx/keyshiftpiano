@@ -56,7 +56,7 @@ from python.converters import (
     convert_source_to_musicxml,
     expand_mxl_to_musicxml,
 )
-from python.pipeline import run_pipeline
+from python.pipeline import _report_engines, run_pipeline
 from python.pdf_conversion import STAFF_NOTATION_REQUIRED_MESSAGE, convert_pdf_to_musicxml
 
 
@@ -2895,6 +2895,41 @@ class PdfImportCleanupRegressionTests(unittest.TestCase):
 
 
 class PipelineTests(unittest.TestCase):
+    def test_engine_report_identifies_direct_musicxml_processing(self):
+        stages = []
+        with patch(
+            "python.pipeline.get_last_transposition_report",
+            return_value={
+                "engine": "new-key-scores-direct",
+                "key_detection_engine": "new-key-scores-direct",
+            },
+        ):
+            _report_engines(
+                lambda name, detail="": stages.append((name, detail)),
+                Path("song.musicxml"),
+            )
+
+        self.assertEqual(stages[0][0], "Engine report")
+        self.assertIn("Input reader: New Key Scores MusicXML reader", stages[0][1])
+        self.assertIn("MusicXML output: New Key Scores direct MusicXML transposer/writer", stages[0][1])
+        self.assertNotIn("music21", stages[0][1])
+
+    def test_engine_report_discloses_pdf_and_music21_fallbacks(self):
+        stages = []
+        with patch(
+            "python.pipeline.get_last_transposition_report",
+            return_value={"engine": "music21-fallback", "key_detection_engine": "music21"},
+        ):
+            _report_engines(
+                lambda name, detail="": stages.append((name, detail)),
+                Path("scan.pdf"),
+            )
+
+        detail = stages[0][1]
+        self.assertIn("Audiveris OMR + New Key Scores PDF recovery", detail)
+        self.assertIn("music21 compatibility transposer/writer", detail)
+        self.assertIn("Key detection: music21 compatibility fallback", detail)
+
     def test_musicxml_input_routes_to_transposer(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             tmp_path = Path(tmpdir)
@@ -3117,6 +3152,7 @@ class PipelineTests(unittest.TestCase):
                     "Transposing",
                     "Validation report",
                     "Validate Output",
+                    "Engine report",
                     "Complete",
                 ],
             )

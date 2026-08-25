@@ -244,6 +244,29 @@ button:disabled {
   background: #f4fbf5;
 }
 
+.engine-report {
+  margin-top: 10px;
+  padding: 12px 14px;
+  border: 1px solid rgba(47, 111, 115, 0.3);
+  border-radius: 6px;
+  color: var(--accent-dark);
+  background: #f3f9f8;
+}
+
+.engine-report summary {
+  cursor: pointer;
+  font-weight: 800;
+}
+
+.engine-report ul {
+  margin: 10px 0 0;
+  padding-left: 20px;
+}
+
+.engine-report li + li {
+  margin-top: 6px;
+}
+
 .progress-wrap {
   margin-top: 10px;
 }

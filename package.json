@@ -1,6 +1,6 @@
 {
   "name": "new-key-scores",
-  "version": "0.1.6",
+  "version": "0.2.0-alpha.1",
   "description": "A privacy-first desktop app for transposing MusicXML and PDF sheet music.",
   "main": "src/main/main.js",
   "author": "New Key Scores",
@@ -8,7 +8,7 @@
   "private": true,
   "scripts": {
     "start": "electron .",
-    "test:js": "node --test tests/engineRuntime.test.js tests/packaging.test.js tests/toolDetection.test.js",
+    "test:js": "node --test tests/engineReport.test.js tests/engineRuntime.test.js tests/packaging.test.js tests/toolDetection.test.js",
     "test:python": "python -m unittest discover -s tests",
     "build:engine": "node scripts/build-engine.js",
     "pack": "npm run build:engine && electron-builder --dir",
@@ -38,7 +38,7 @@
     ],
     "win": {
       "target": "nsis",
-      "signAndEditExecutable": false
+      "signExecutable": false
     },
     "nsis": {
       "oneClick": true,

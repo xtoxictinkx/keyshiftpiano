@@ -101,6 +101,7 @@ def run_pipeline(
 
         result = transpose_to_key(musicxml_source, destination_path, target_key_name)
         _report_validation(progress, original_key, target_key_name, import_cleanup_report=import_cleanup_report)
+        _report_engines(progress, source_path)
         report("Complete", f"Saved {result}")
         return result
 
@@ -109,6 +110,33 @@ def _get_temp_root(temp_dir: str | Path | None) -> Path:
     root = Path(temp_dir).expanduser() if temp_dir else Path(tempfile.gettempdir()) / "New Key Scores"
     root.mkdir(parents=True, exist_ok=True)
     return root
+
+
+def _report_engines(progress, source_path: Path) -> None:
+    if progress is None:
+        return
+
+    transposition_report = get_last_transposition_report() or {}
+    if source_path.suffix.lower() == ".pdf":
+        input_reader = "Audiveris OMR + New Key Scores PDF recovery"
+    elif source_path.suffix.lower() == ".mxl":
+        input_reader = "New Key Scores compressed MusicXML reader"
+    else:
+        input_reader = "New Key Scores MusicXML reader"
+
+    transposition_engine = transposition_report.get("engine")
+    if transposition_engine == "new-key-scores-direct":
+        writer = "New Key Scores direct MusicXML transposer/writer"
+    elif transposition_engine == "music21-fallback":
+        writer = "music21 compatibility transposer/writer"
+    else:
+        writer = "transposition engine not reported"
+
+    details = [f"Input reader: {input_reader}", f"MusicXML output: {writer}"]
+    if transposition_report.get("key_detection_engine") == "music21":
+        details.append("Key detection: music21 compatibility fallback")
+
+    progress("Engine report", "; ".join(details))
 
 
 def _report_validation(

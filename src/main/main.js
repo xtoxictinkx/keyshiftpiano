@@ -4,6 +4,7 @@ const fs = require('fs');
 const { spawn } = require('child_process');
 const { detectToolPaths } = require('./toolDetection');
 const { selectTransposerExecutable } = require('./engineRuntime');
+const { appendEngineReport } = require('./engineReport');
 
 const MUSICXML_EXTENSIONS = new Set(['.musicxml', '.xml', '.mxl']);
 const MUSICXML_OUTPUT_EXTENSIONS = new Set(['.musicxml', '.xml']);
@@ -396,6 +397,7 @@ function runTransposer(inputPath, outputPath, targetKey, outputFormat, settings,
     let stdout = '';
     let stderr = '';
     let stdoutBuffer = '';
+    let engineReport = '';
 
     child.stdout.on('data', (data) => {
       stdoutBuffer += data.toString();
@@ -409,6 +411,9 @@ function runTransposer(inputPath, outputPath, targetKey, outputFormat, settings,
 
         const stage = parseStageLine(line);
         if (stage) {
+          if (stage.name === 'Engine report') {
+            engineReport = stage.detail || '';
+          }
           sender?.send('processing-stage', stage);
         } else {
           stdout += `${line}\n`;
@@ -428,6 +433,9 @@ function runTransposer(inputPath, outputPath, targetKey, outputFormat, settings,
       if (stdoutBuffer.trim()) {
         const stage = parseStageLine(stdoutBuffer.trim());
         if (stage) {
+          if (stage.name === 'Engine report') {
+            engineReport = stage.detail || '';
+          }
           sender?.send('processing-stage', stage);
         } else {
           stdout += `${stdoutBuffer.trim()}\n`;
@@ -435,7 +443,7 @@ function runTransposer(inputPath, outputPath, targetKey, outputFormat, settings,
       }
 
       if (code === 0) {
-        resolve(stdout.trim());
+        resolve({ outputPath: stdout.trim(), engineReport });
       } else {
         reject(new Error((stderr || stdout || 'The transposition failed.').trim()));
       }
@@ -688,7 +696,14 @@ ipcMain.handle('transpose-file', async (event, payload) => {
   if (outputFormat === 'pdf') {
     const intermediateMusicXml = getTempMusicXmlPath(saveResult.filePath);
     try {
-      await runTransposer(inputPath, intermediateMusicXml, targetKey, 'musicxml', settings, event.sender);
+      const transposition = await runTransposer(
+        inputPath,
+        intermediateMusicXml,
+        targetKey,
+        'musicxml',
+        settings,
+        event.sender
+      );
       event.sender?.send('processing-stage', { type: 'stage', name: 'Exporting output' });
       const pdfPath = await exportMusicXmlToPdfWithMuseScore(
         intermediateMusicXml,
@@ -701,19 +716,28 @@ ipcMain.handle('transpose-file', async (event, payload) => {
         canceled: false,
         outputPath: pdfPath,
         requestedOutputPath: saveResult.filePath,
-        outputFormat
+        outputFormat,
+        engineReport: appendEngineReport(transposition.engineReport, 'PDF writer: MuseScore Studio')
       };
     } finally {
       fs.rmSync(intermediateMusicXml, { force: true });
     }
   }
 
-  const actualOutputPath = await runTransposer(inputPath, saveResult.filePath, targetKey, outputFormat, settings, event.sender);
+  const transposition = await runTransposer(
+    inputPath,
+    saveResult.filePath,
+    targetKey,
+    outputFormat,
+    settings,
+    event.sender
+  );
   return {
     canceled: false,
-    outputPath: actualOutputPath || saveResult.filePath,
+    outputPath: transposition.outputPath || saveResult.filePath,
     requestedOutputPath: saveResult.filePath,
-    outputFormat
+    outputFormat,
+    engineReport: transposition.engineReport
   };
 });
 

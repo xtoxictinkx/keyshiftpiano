@@ -5,6 +5,8 @@ const targetKeySelect = document.querySelector('#target-key');
 const outputFormatSelect = document.querySelector('#output-format');
 const pdfNote = document.querySelector('#pdf-note');
 const statusBox = document.querySelector('#status');
+const engineReport = document.querySelector('#engine-report');
+const engineReportList = document.querySelector('#engine-report-list');
 const progressWrap = document.querySelector('#progress-wrap');
 const progressTrack = document.querySelector('.progress-track');
 const progressFill = document.querySelector('#progress-fill');
@@ -36,6 +38,7 @@ const STAGE_PROGRESS = {
   Transposing: 68,
   'Validation report': 78,
   'Validate Output': 82,
+  'Engine report': 86,
   'Exporting output': 90,
   Complete: 100
 };
@@ -55,6 +58,27 @@ function setProgress(value, isActive = false) {
 
 function resetProgress() {
   setProgress(0, false);
+}
+
+function resetEngineReport() {
+  engineReport.hidden = true;
+  engineReportList.replaceChildren();
+}
+
+function showEngineReport(detail) {
+  const entries = String(detail || '')
+    .split(';')
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+
+  engineReportList.replaceChildren();
+  for (const entry of entries) {
+    const item = document.createElement('li');
+    item.textContent = entry;
+    engineReportList.appendChild(item);
+  }
+  engineReport.hidden = entries.length === 0;
+  engineReport.open = entries.length > 0;
 }
 
 function describeSelectedFile() {
@@ -83,7 +107,7 @@ function getFriendlyErrorMessage(error, fallback) {
 }
 
 function isValidInputPath(filePath) {
-  return /\.(musicxml|xml|pdf)$/i.test(filePath || '');
+  return /\.(musicxml|xml|mxl|pdf)$/i.test(filePath || '');
 }
 
 function isPdfPath(filePath) {
@@ -141,6 +165,8 @@ function formatStageStatus(stage) {
       return stage.detail ? `Validation report: ${stage.detail}` : 'Validation report complete.';
     case 'Validate Output':
       return stage.detail ? `Validate Output: ${stage.detail}` : 'Output validation complete.';
+    case 'Engine report':
+      return stage.detail ? `Engines used: ${stage.detail}` : 'Engine report complete.';
     case 'Exporting output':
       return 'Exporting output...';
     case 'Complete':
@@ -161,7 +187,8 @@ function getMissingToolMessage() {
 chooseFileButton.addEventListener('click', async () => {
   try {
     setStatus('');
-    const fileInfo = await window.keyShiftPiano.selectFile();
+    resetEngineReport();
+    const fileInfo = await window.newKeyScores.selectFile();
     if (!fileInfo) {
       return;
     }
@@ -172,7 +199,7 @@ chooseFileButton.addEventListener('click', async () => {
       selectedFileType = '';
       originalKey = '';
       fileInput.value = '';
-      setStatus('Please choose a .musicxml, .xml, or .pdf file.', 'error');
+      setStatus('Please choose a .musicxml, .xml, .mxl, or .pdf file.', 'error');
       return;
     }
 
@@ -199,7 +226,7 @@ chooseFileButton.addEventListener('click', async () => {
 
 shiftButton.addEventListener('click', async () => {
   if (!selectedFile || !isValidInputPath(selectedFile)) {
-    setStatus('Choose a .musicxml, .xml, or .pdf file first.', 'error');
+    setStatus('Choose a .musicxml, .xml, .mxl, or .pdf file first.', 'error');
     return;
   }
 
@@ -211,9 +238,10 @@ shiftButton.addEventListener('click', async () => {
 
   try {
     setBusy(true);
+    resetEngineReport();
     setProgress(5, true);
     setStatus('Loading file...');
-    const result = await window.keyShiftPiano.transposeFile({
+    const result = await window.newKeyScores.transposeFile({
       inputPath: selectedFile,
       targetKey: targetKeySelect.value,
       outputFormat: outputFormatSelect.value
@@ -226,6 +254,7 @@ shiftButton.addEventListener('click', async () => {
 
     const outputName = result.outputFormat === 'pdf' ? 'PDF' : 'MusicXML';
     setStatus(`Saved transposed ${outputName} to ${result.outputPath}`, 'success');
+    showEngineReport(result.engineReport);
   } catch (error) {
     setStatus(getFriendlyErrorMessage(error, 'The file could not be processed.'), 'error');
     resetProgress();
@@ -238,7 +267,7 @@ outputFormatSelect.addEventListener('change', updateModeText);
 
 async function loadSettings() {
   try {
-    const settings = await window.keyShiftPiano.getSettings();
+    const settings = await window.newKeyScores.getSettings();
     toolSettings = {
       audiverisPath: settings?.audiverisPath || '',
       musescorePath: settings?.musescorePath || '',
@@ -254,7 +283,7 @@ async function loadSettings() {
 
 async function saveSettings(showConfirmation = true) {
   try {
-    toolSettings = await window.keyShiftPiano.saveSettings({
+    toolSettings = await window.newKeyScores.saveSettings({
       audiverisPath: audiverisPathInput.value,
       musescorePath: musescorePathInput.value,
       cleanExportLayout: cleanExportLayoutInput.checked
@@ -273,7 +302,7 @@ async function saveSettings(showConfirmation = true) {
 
 async function chooseToolPath(tool, input) {
   try {
-    const filePath = await window.keyShiftPiano.chooseToolPath({ tool });
+    const filePath = await window.newKeyScores.chooseToolPath({ tool });
     if (!filePath) {
       return;
     }
@@ -290,7 +319,7 @@ async function testToolPath(tool, input) {
   try {
     setBusy(true);
     setStatus(`Testing ${tool === 'musescore' ? 'MuseScore' : 'Audiveris'} path...`);
-    const message = await window.keyShiftPiano.testToolPath({
+    const message = await window.newKeyScores.testToolPath({
       tool,
       path: input.value
     });
@@ -307,7 +336,7 @@ async function findToolsAutomatically() {
   try {
     setBusy(true);
     setStatus('Searching common install locations and Start Menu shortcuts...');
-    const result = await window.keyShiftPiano.findToolsAutomatically();
+    const result = await window.newKeyScores.findToolsAutomatically();
     toolSettings = result.savedSettings || toolSettings;
     audiverisPathInput.value = toolSettings.audiverisPath || '';
     musescorePathInput.value = toolSettings.musescorePath || '';
@@ -330,12 +359,16 @@ testMuseScoreButton.addEventListener('click', () => testToolPath('musescore', mu
 findToolsButton.addEventListener('click', findToolsAutomatically);
 saveSettingsButton.addEventListener('click', () => saveSettings(true));
 
-window.keyShiftPiano.onProcessingStage((stage) => {
+window.newKeyScores.onProcessingStage((stage) => {
   updateProgressForStage(stage);
+  if (stage?.name === 'Engine report') {
+    showEngineReport(stage.detail);
+  }
   setStatus(formatStageStatus(stage), stage?.name === 'Complete' ? 'success' : 'neutral');
 });
 
 updateModeText();
 loadSettings();
 resetProgress();
+resetEngineReport();
 setStatus('Choose an input file to begin.');
